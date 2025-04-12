@@ -1,0 +1,47 @@
+guest:
+  - read:products
+  - read:vendors
+
+user:
+  - read:products
+  - create:orders
+  - message:vendor
+  - manage:profile
+  - write:otp
+  - read:otp
+
+vendor:
+  incomplete:
+    - read:profile
+    - write:otp
+    - read:otp
+  pending:
+    - read:profile
+    - write:otp
+    - read:otp
+  collaborative:
+    - attach:product
+    - read:profile
+    - write:profile
+    - write:otp
+    - read:otp
+  public:
+    - write:products
+    - read:orders
+    - manage:ads
+    - message:user
+    - write:otp
+    - read:otp
+  private:
+    - read:profile
+    - write:profile
+    - manage:store
+    - write:otp
+    - read:otp
+  temporarily_closed:
+    - read:profile
+    - write:otp
+    - read:otp
+
+admin:
+  - "*"

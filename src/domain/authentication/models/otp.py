@@ -18,15 +18,16 @@ class RequestOTPInput(BaseModel):
     client_version: Optional[str] = Field(default=None, max_length=15, description="Version of the client app")
     device_fingerprint: Optional[str] = Field(default=None, max_length=100, description="Unique device fingerprint (optional)")
 
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
         try:
-            return validate_and_format_phone(v)
-        except ValueError:
-            raise ValueError("Invalid phone number.")
+            formatted = validate_and_format_phone(v)
+            return formatted
+        except ValueError as e:
+            raise ValueError(f"Invalid phone number: {str(e)}")
 
     @field_validator("response_language")
     @classmethod

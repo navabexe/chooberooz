@@ -2,7 +2,7 @@ import hashlib
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import Request
+from fastapi import Request, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 
@@ -21,6 +21,7 @@ from src.domain.notification.services.notification_service import notification_s
 from src.infrastructure.storage.cache.repositories.otp_repository import OTPRepository
 from src.infrastructure.storage.nosql.client import get_nosql_db
 from src.infrastructure.storage.nosql.repositories.user_repository import UserRepository
+from src.shared.security.permissions_loader import get_scopes_for_role
 
 
 def hash_otp(otp: str) -> str:
@@ -45,6 +46,11 @@ class OTPService(BaseService):
         user_agent: str = "Unknown"
     ) -> dict:
         """Request a new OTP for authentication."""
+        # Check permissions for role
+        scopes = get_scopes_for_role(role)
+        if "write:otp" not in scopes:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to request OTP")
+
         repo = OTPRepository(redis)
         if db is None:
             db = await get_nosql_db()
@@ -177,7 +183,13 @@ class OTPService(BaseService):
             phone = payload.get("sub")
             role = payload.get("role")
             jti = payload.get("jti")
+            status = payload.get("status")
             context["entity_id"] = phone
+
+            # Check permissions for role and status
+            scopes = get_scopes_for_role(role, vendor_status=status if role == "vendor" else None)
+            if "read:otp" not in scopes:
+                raise HTTPException(status_code=403, detail="Insufficient permissions to verify OTP")
 
             if not phone or not role or not jti:
                 raise BadRequestException(detail=get_message("token.invalid", language))

@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     VALID_VISIBILITY: List[str] = Field(["COLLABORATIVE", "PUBLIC", "PRIVATE", "TEMPORARILY_CLOSED"], description="Valid visibility options for vendors")
     VALID_VENDOR_TYPES: List[str] = Field(["BASIC", "PRO"], description="Valid vendor types")
 
+    CORS_ORIGINS: str = "http://localhost:3000"
+
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
         env_file_encoding="utf-8",

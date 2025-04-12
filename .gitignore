@@ -1,0 +1,16 @@
+# Logs
+logs/
+*.log.*
+
+# Certificates
+*.pem
+*.crt
+*.key
+
+# Temporary files
+.DS_Store
+*.swp
+*.swo
+
+# IDE-specific
+*.code-workspace
