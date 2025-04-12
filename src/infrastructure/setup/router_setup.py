@@ -20,14 +20,16 @@ def setup_routers(app: FastAPI):
         - Logs each successful registration and any errors encountered.
         - If no routers are found, logs a warning but continues execution.
     """
-    base_router = APIRouter(prefix="/api", tags=[settings.AUTH_TAG])
-    # Correct path to src/api/v1/endpoints
+    # پایه روتر بدون پیشوند اضافی
+    base_router = APIRouter(tags=[settings.AUTH_TAG])
+
+    # محاسبه مسیر دایرکتوری endpoints
     routers_dir = Path(__file__).resolve().parent.parent.parent / "api" / "v1" / "endpoints"
 
-    # Initialize a counter for registered routers
+    # شمارشگر برای روترهای ثبت‌شده
     registered_count = 0
 
-    # Check if routers directory exists
+    # بررسی وجود دایرکتوری
     if not routers_dir.exists():
         log_error(
             "Routers directory not found, skipping router registration",
@@ -36,32 +38,26 @@ def setup_routers(app: FastAPI):
         app.include_router(base_router)
         return
 
-    # Log the directory being scanned
     log_info("Scanning routers directory", extra={"path": str(routers_dir)})
 
-    # Scan for Python files recursively
+    # اسکن فایل‌های Python به صورت بازگشتی
     for file_path in routers_dir.rglob("*.py"):
-        # Skip unwanted files (like __init__.py)
+        # نادیده گرفتن فایل‌هایی که با _ شروع می‌شن
         if file_path.name.startswith("_"):
-            log_info(
-                "Skipping non-router file",
-                extra={"file": str(file_path)},
-            )
+            log_info("Skipping non-router file", extra={"file": str(file_path)})
             continue
 
-        # Convert file path to module path
-        relative_path = file_path.relative_to(routers_dir).with_suffix("")
-        # Use posix path to ensure forward slashes (/) for module path
-        module_path = f"src.api.v1.endpoints.{relative_path.as_posix().replace('/', '.')}"
+        # تبدیل مسیر فایل به مسیر ماژول
+        relative_path = file_path.relative_to(routers_dir.parent.parent.parent).with_suffix("")
+        module_path = f"src.{relative_path.as_posix().replace('/', '.')}"
 
-        # Log the module path for debugging
         log_info("Attempting to import module", extra={"module_path": module_path})
 
         try:
-            # Import the module
+            # وارد کردن ماژول
             module = import_module(module_path)
 
-            # Check if module has a 'router' attribute
+            # بررسی وجود شیء router در ماژول
             if hasattr(module, "router"):
                 base_router.include_router(module.router)
                 registered_count += 1
@@ -79,16 +75,18 @@ def setup_routers(app: FastAPI):
             log_error(
                 "Failed to import router module",
                 extra={"module": module_path, "error": str(e)},
+                exc_info=True
             )
             continue
         except Exception as e:
             log_error(
                 "Unexpected error while registering router",
                 extra={"module": module_path, "error": str(e)},
+                exc_info=True
             )
             continue
 
-    # Register the base router with the app
+    # ثبت پایه روتر با اپلیکیشن
     app.include_router(base_router)
 
     if registered_count == 0:

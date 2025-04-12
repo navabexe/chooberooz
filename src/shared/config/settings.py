@@ -4,11 +4,9 @@ from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # Calculate base directory for consistent file paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 ENV_PATH = BASE_DIR / ".env"
-
 
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
@@ -76,8 +74,8 @@ class Settings(BaseSettings):
 
     # API Routes and Tags
     AUTH_TAG: str = Field("Authentication", description="Tag for authentication endpoints")
-    REQUEST_OTP_PATH: str = Field("/request-otp", description="Path for request OTP endpoint")
-    VERIFY_OTP_PATH: str = Field("/verify-otp", description="Path for verify OTP endpoint")
+    REQUEST_OTP_PATH: str = Field("/api/v1/request-otp", description="Path for request OTP endpoint")
+    VERIFY_OTP_PATH: str = Field("/api/v1/verify-otp", description="Path for verify OTP endpoint")
     APPROVE_VENDOR_PATH: str = Field("/approve-vendor", description="Path for approve vendor endpoint")
     ADMIN_TAG: str = Field("Admin", description="Tag for admin endpoints")
     VENDOR_APPROVAL_RATE_LIMIT: int = Field(10, description="Max vendor approval attempts per hour")
@@ -89,12 +87,15 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:3000"
 
+    # Language settings
+    DEFAULT_LANGUAGE: str = Field("fa", description="Default language for responses")
+    SUPPORTED_LANGUAGES: str = Field("fa,en,ar", description="Comma-separated list of supported languages")
+
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="allow"  # Allow extra fields to avoid Pydantic errors
     )
-
 
 settings = Settings()

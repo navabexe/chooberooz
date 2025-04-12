@@ -1,16 +1,14 @@
 from typing import Optional, Dict, List
-
 from redis.asyncio import Redis
-
 from src.infrastructure.storage.cache.client import get_cache_client
-
 
 class OTPRepository:
     def __init__(self, redis: Redis = None):
         self.redis = redis or get_cache_client()
 
     async def get(self, key: str) -> Optional[str]:
-        return await (await self.redis).get(key)
+        value = await (await self.redis).get(key)
+        return value.decode("utf-8") if isinstance(value, bytes) else value
 
     async def setex(self, key: str, ttl: int, value: str):
         await (await self.redis).setex(key, ttl, value)
