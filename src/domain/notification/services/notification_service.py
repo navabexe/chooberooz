@@ -2,9 +2,10 @@ from datetime import datetime, timezone
 from typing import List, Dict, Union
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.shared.errors.base import DatabaseConnectionException
-from src.shared.utilities.logging import log_error, log_info
+from src.shared.utilities.logging import log_error, log_info, log_warning
 from src.domain.notification.models.notification import Notification, NotificationChannel
 from src.domain.notification.services.builder import build_notification_content
 from src.infrastructure.storage.nosql.client import get_nosql_db
@@ -12,6 +13,38 @@ from src.infrastructure.storage.nosql.repositories.base import MongoRepository
 
 
 class NotificationService:
+    async def validate_notification_input(
+        self,
+        receiver_id: str,
+        receiver_type: str,
+        template_key: str,
+        channel: NotificationChannel,
+        variables: dict = None,
+        language: str = "fa"
+    ) -> None:
+        """Validate inputs for sending a notification."""
+        if not receiver_id or not isinstance(receiver_id, str):
+            raise ValueError("Invalid receiver_id")
+        if not receiver_type or not isinstance(receiver_type, str):
+            raise ValueError("Invalid receiver_type")
+        if not template_key or not isinstance(template_key, str):
+            raise ValueError("Invalid template_key")
+        if channel not in NotificationChannel:
+            raise ValueError(f"Unsupported channel: {channel}")
+        if language not in ["fa", "en"]:
+            raise ValueError(f"Unsupported language: {language}")
+        if variables is not None and not isinstance(variables, dict):
+            raise ValueError("Variables must be a dictionary")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(DatabaseConnectionException),
+        before_sleep=lambda retry_state: log_info(
+            "Retrying notification dispatch",
+            extra={"attempt": retry_state.attempt_number, "error": str(retry_state.outcome.exception())}
+        )
+    )
     async def _dispatch_notification(
         self,
         receiver_id: str,
@@ -83,6 +116,93 @@ class NotificationService:
         except Exception as e:
             raise Exception(f"Failed to dispatch notification: {str(e)}")
 
+    async def _handle_notification_error(
+        self,
+        error: Exception,
+        receiver_id: str,
+        template_key: str,
+        return_bool: bool,
+        language: str,
+        db: AsyncIOMotorDatabase,
+        _is_retry: bool
+    ) -> Union[str, bool]:
+        """Handle errors during notification sending."""
+        error_type = "general"
+        if isinstance(error, ValueError):
+            error_type = "template"
+        elif isinstance(error, DatabaseConnectionException):
+            error_type = "database"
+
+        log_error(f"Notification service failed ({error_type})", extra={
+            "receiver_id": receiver_id,
+            "template_key": template_key,
+            "error": str(error)
+        })
+
+        if not _is_retry and receiver_id != "admin":
+            await self._handle_critical_failure(error, receiver_id, template_key, db, language)
+
+        if return_bool:
+            return False
+        raise error
+
+    async def _handle_critical_failure(
+        self,
+        error: Exception,
+        receiver_id: str,
+        template_key: str,
+        db: AsyncIOMotorDatabase,
+        language: str = "fa"
+    ) -> None:
+        """Handle critical notification failures."""
+        log_error("Critical notification failure", extra={
+            "receiver_id": receiver_id,
+            "template_key": template_key,
+            "error": str(error),
+            "type": "critical"
+        })
+        try:
+            await self.send(
+                receiver_id="admin",
+                receiver_type="admin",
+                template_key="critical_notification_failed",
+                variables={"receiver_id": receiver_id, "error": str(error), "template_key": template_key},
+                reference_type="system",
+                reference_id=receiver_id,
+                language=language,
+                db=db,
+                _is_retry=True
+            )
+        except Exception as e:
+            log_error("Failed to notify admin of critical failure", extra={"error": str(e)})
+
+    async def send_to_additional_receivers(
+        self,
+        additional_receivers: List[Dict[str, str]],
+        template_key: str,
+        channel: NotificationChannel,
+        variables: dict,
+        reference_type: str,
+        reference_id: str,
+        created_by: str,
+        language: str,
+        db: AsyncIOMotorDatabase
+    ) -> None:
+        """Send notifications to additional receivers."""
+        for receiver in additional_receivers or []:
+            await self.send(
+                receiver_id=receiver["id"],
+                receiver_type=receiver["type"],
+                template_key=template_key,
+                channel=channel,
+                variables=variables,
+                reference_type=reference_type,
+                reference_id=reference_id,
+                created_by=created_by,
+                language=language,
+                db=db
+            )
+
     async def send(
         self,
         receiver_id: str,
@@ -100,12 +220,10 @@ class NotificationService:
         _is_retry: bool = False
     ) -> Union[str, bool]:
         """Send a notification with templated content."""
+        await self.validate_notification_input(receiver_id, receiver_type, template_key, channel, variables, language)
+
         try:
-            content = await build_notification_content(
-                template_key,
-                language=language,
-                variables=variables or {}
-            )
+            content = await build_notification_content(template_key, language=language, variables=variables or {})
             notification_id = await self._dispatch_notification(
                 receiver_id=receiver_id,
                 receiver_type=receiver_type,
@@ -123,87 +241,30 @@ class NotificationService:
                 "notification_id": notification_id
             })
 
-            for receiver in additional_receivers or []:
-                await self.send(
-                    receiver_id=receiver["id"],
-                    receiver_type=receiver["type"],
-                    template_key=template_key,
-                    channel=channel,
-                    variables=variables,
-                    reference_type=reference_type,
-                    reference_id=reference_id,
-                    created_by=created_by,
-                    language=language,
-                    db=db
-                )
+            await self.send_to_additional_receivers(
+                additional_receivers=additional_receivers,
+                template_key=template_key,
+                channel=channel,
+                variables=variables,
+                reference_type=reference_type,
+                reference_id=reference_id,
+                created_by=created_by,
+                language=language,
+                db=db
+            )
 
             return True if return_bool else notification_id
 
-        except ValueError as ve:
-            log_error("Invalid template in notification", extra={
-                "receiver_id": receiver_id,
-                "template_key": template_key,
-                "error": str(ve)
-            })
-            if not _is_retry and receiver_id != "admin":
-                await self.send(
-                    receiver_id="admin",
-                    receiver_type="admin",
-                    template_key="notification_failed",
-                    variables={"receiver_id": receiver_id, "error": str(ve), "type": "template"},
-                    reference_type="system",
-                    reference_id=receiver_id,
-                    language=language,
-                    db=db,
-                    _is_retry=True
-                )
-            if return_bool:
-                return False
-            raise
-
-        except DatabaseConnectionException as db_exc:
-            log_error("Database error in notification service", extra={
-                "receiver_id": receiver_id,
-                "template_key": template_key,
-                "error": str(db_exc)
-            })
-            if not _is_retry and receiver_id != "admin":
-                await self.send(
-                    receiver_id="admin",
-                    receiver_type="admin",
-                    template_key="notification_failed",
-                    variables={"receiver_id": receiver_id, "error": str(db_exc), "type": "database"},
-                    reference_type="system",
-                    reference_id=receiver_id,
-                    language=language,
-                    db=db,
-                    _is_retry=True
-                )
-            if return_bool:
-                return False
-            raise
-
         except Exception as e:
-            log_error("Notification service failed", extra={
-                "receiver_id": receiver_id,
-                "template_key": template_key,
-                "error": str(e)
-            })
-            if not _is_retry and receiver_id != "admin":
-                await self.send(
-                    receiver_id="admin",
-                    receiver_type="admin",
-                    template_key="notification_failed",
-                    variables={"receiver_id": receiver_id, "error": str(e), "type": "general"},
-                    reference_type="system",
-                    reference_id=receiver_id,
-                    language=language,
-                    db=db,
-                    _is_retry=True
-                )
-            if return_bool:
-                return False
-            raise
+            return await self._handle_notification_error(
+                error=e,
+                receiver_id=receiver_id,
+                template_key=template_key,
+                return_bool=return_bool,
+                language=language,
+                db=db,
+                _is_retry=_is_retry
+            )
 
     async def send_otp_verified(self, phone: str, role: str, language: str, db: AsyncIOMotorDatabase) -> bool:
         """Send notification for OTP verification."""
@@ -299,21 +360,12 @@ class NotificationService:
                 "error": str(e)
             })
             if user_id != "admin":
-                await self.send(
-                    receiver_id="admin",
-                    receiver_type="admin",
-                    template_key="notification_failed",
-                    variables={
-                        "receiver_id": "admin",
-                        "user_id": user_id,
-                        "error": str(e),
-                        "type": "general"
-                    },
-                    reference_type="session",
-                    reference_id=user_id,
-                    language=language,
+                await self._handle_critical_failure(
+                    error=e,
+                    receiver_id=user_id,
+                    template_key="sessions.checked",
                     db=db,
-                    _is_retry=True
+                    language=language
                 )
             return False
 

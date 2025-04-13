@@ -1,11 +1,15 @@
 from typing import Literal
 
 from src.shared.i18n.messages import get_message
-from src.shared.utilities.logging import log_info, log_error
+from src.shared.utilities.logging import log_info, log_error, log_warning
 from src.domain.notification.services.templates.sample_templates import TEMPLATE_VARIABLES
 
 
 SUPPORTED_LANGUAGES = ["fa", "en"]
+DEFAULT_TEMPLATE = {
+    "title": "Notification Error",
+    "body": "Unable to process notification due to missing template: {template_key}"
+}
 
 
 async def build_notification_content(
@@ -15,7 +19,15 @@ async def build_notification_content(
 ) -> dict:
     """Build notification content from template key with variable substitution."""
     if language not in SUPPORTED_LANGUAGES:
+        log_warning("Unsupported language, falling back to default", extra={"language": language})
         language = "fa"
+
+    if template_key not in TEMPLATE_VARIABLES:
+        log_warning("Unknown template key, using default", extra={"template_key": template_key})
+        return {
+            "title": DEFAULT_TEMPLATE["title"],
+            "body": DEFAULT_TEMPLATE["body"].format(template_key=template_key)
+        }
 
     variables = variables or {}
     title_key = f"notification.{template_key}.title"
@@ -26,7 +38,10 @@ async def build_notification_content(
         missing_vars = [var for var in required_vars if var not in variables]
         if missing_vars:
             error_msg = f"Missing variables for {template_key}: {missing_vars}"
-            log_error("Missing variables in template", extra={"template_key": template_key, "missing": missing_vars})
+            log_error("Missing variables in template", extra={
+                "template_key": template_key,
+                "missing": missing_vars
+            })
             raise ValueError(error_msg)
 
         title = get_message(title_key, lang=language).format(**variables)
@@ -41,11 +56,15 @@ async def build_notification_content(
         })
         return {"title": title, "body": body}
 
-    except KeyError as e:
-        error_msg = f"Template {template_key} missing variable {str(e)} for language {language}"
-        log_error("Template key not found", extra={"template_key": template_key, "error": str(e)})
-        raise ValueError(error_msg)
-    except Exception as e:
-        error_msg = f"Failed to build content for {template_key}: {str(e)}"
-        log_error("Failed to build notification content", extra={"error": str(e)})
-        raise
+    except (KeyError, ValueError) as e:
+        log_error("Template processing failed, using default", extra={
+            "template_key": template_key,
+            "language": language,
+            "variables": variables,
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        return {
+            "title": DEFAULT_TEMPLATE["title"],
+            "body": DEFAULT_TEMPLATE["body"].format(template_key=template_key)
+        }
