@@ -1,12 +1,13 @@
-from typing import Annotated
-from fastapi import APIRouter, Request, Depends
+from typing import Annotated, Coroutine, Any, Union
+from fastapi import APIRouter, Request, Depends, status
 from pydantic import Field, field_validator
-from starlette import status
+from redis.exceptions import ConnectionError as RedisConnectionError
+
 from src.shared.config.settings import settings
 from src.shared.utilities.network import get_client_ip
 from src.shared.utilities.logging import log_info, log_error
 from src.shared.models.requests.base import BaseRequestModel
-from src.shared.models.responses.base import StandardResponse, Meta
+from src.shared.models.responses.base import StandardResponse, ErrorResponse
 from src.shared.i18n.messages import get_message
 from src.shared.errors.base import TooManyRequestsException, BadRequestException
 from src.shared.security.token import decode_token
@@ -24,10 +25,12 @@ class VerifyOTPModel(BaseRequestModel):
     device_fingerprint: Annotated[str | None, Field(default=None, description="Device fingerprint")]
     role: str | None = None
     status: str | None = None
+
     model_config = {
         "str_strip_whitespace": True,
         "extra": "allow",
     }
+
     @field_validator("response_language")
     @classmethod
     def validate_language(cls, v: str) -> str:
@@ -36,50 +39,15 @@ class VerifyOTPModel(BaseRequestModel):
             raise ValueError(f"Unsupported language. Allowed: {', '.join(allowed)}.")
         return v
 
-@router.post(
-    "/verify-otp",
-    status_code=status.HTTP_200_OK,
-    response_model=StandardResponse,
-    summary="Verify OTP"
-)
-async def verify_otp_endpoint(
-    data: VerifyOTPModel,
-    request: Request,
-    client_ip: Annotated[str, Depends(get_client_ip)],
-    context: dict = Depends(check_database_connection),
-) -> StandardResponse:
-    """Verify an OTP code provided by the user."""
-    log_info("Received request body", extra={"body": data.model_dump()})
+def check_otp_permission(role: str, status: str | None) -> Coroutine[Any, Any, str]:
+    """Check if the role has permission to verify OTP."""
+    return check_permissions(role, "read:otp", vendor_status=status if role == "vendor" else None)
+
+async def call_otp_verification(data: VerifyOTPModel, request: Request, client_ip: str, context: dict) -> dict:
+    """Call OTP service to verify the OTP."""
     try:
-        payload = await decode_token(data.temporary_token, token_type="temp", redis=context["redis"])
-        data.role = payload.get("role")
-        data.status = payload.get("status")
-    except Exception as e:
-        log_error("Failed to verify token", extra={"error": str(e), "temporary_token": data.temporary_token[:10] + "..."})
-        return StandardResponse(
-            data=None,
-            meta=Meta(
-                message=get_message("token.invalid", data.response_language),
-                status="error",
-                code=status.HTTP_401_UNAUTHORIZED
-            )
-        )
-    try:
-        await check_permissions(data.role, "read:otp", vendor_status=data.status if data.role == "vendor" else None)
-    except Exception as e:
-        log_error("Permission check failed", extra={"error": str(e), "role": data.role})
-        return StandardResponse(
-            data=None,
-            meta=Meta(
-                message=str(e),
-                status="error",
-                code=status.HTTP_403_FORBIDDEN
-            )
-        )
-    otp_service = container.otp_service()
-    user_agent = request.headers.get("User-Agent", "Unknown")
-    try:
-        result = await otp_service.verify_otp(
+        otp_service = container.otp_service()
+        return await otp_service.verify_otp(
             otp=data.otp,
             temporary_token=data.temporary_token,
             client_ip=client_ip,
@@ -89,8 +57,91 @@ async def verify_otp_endpoint(
             request_id=data.request_id,
             client_version=data.client_version,
             device_fingerprint=data.device_fingerprint,
-            user_agent=user_agent
+            user_agent=request.headers.get("User-Agent", "Unknown")
         )
+    except RedisConnectionError as e:
+        log_error("Redis connection failed during OTP verification", extra={"error": str(e)})
+        raise BadRequestException(
+            detail="Redis unavailable.",
+            message=get_message("server.error", data.response_language),
+            error_code="REDIS_ERROR",
+            language=data.response_language
+        )
+
+@router.post(
+    "/verify-otp",
+    status_code=status.HTTP_200_OK,
+    response_model=Union[StandardResponse, ErrorResponse],
+    summary="Verify OTP",
+    responses={
+        200: {
+            "description": "OTP successfully verified",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "data": {
+                            "status": "incomplete",
+                            "temporary_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "phone": "+989123456789"
+                        },
+                        "meta": {
+                            "message": "Please complete your profile.",
+                            "status": "success",
+                            "code": 200
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Invalid OTP or token",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "The entered code is incorrect. 4 attempts left.",
+                        "message": "The code you entered is incorrect.",
+                        "error_code": "OTP_INVALID",
+                        "status": "error",
+                        "metadata": {"remaining_attempts": 4}
+                    }
+                }
+            }
+        }
+    }
+)
+async def verify_otp_endpoint(
+    data: VerifyOTPModel,
+    request: Request,
+    client_ip: Annotated[str, Depends(get_client_ip)],
+    context: dict = Depends(check_database_connection),
+) -> Union[StandardResponse, ErrorResponse]:
+    """Verify an OTP and proceed with authentication."""
+    log_info("Received request body", extra={"body": data.model_dump()})
+
+    try:
+        payload = await decode_token(data.temporary_token, token_type="temp", redis=context["redis"])
+        data.role = payload.get("role")
+        data.status = payload.get("status")
+    except Exception as e:
+        log_error("Failed to verify token", extra={"error": str(e), "temporary_token": data.temporary_token[:10] + "..."})
+        return ErrorResponse(
+            detail=str(e),
+            message=get_message("token.invalid", data.response_language),
+            error_code="INVALID_TOKEN"
+        )
+
+    try:
+        await check_otp_permission(data.role, data.status)
+    except Exception as e:
+        log_error("Permission check failed", extra={"error": str(e), "role": data.role})
+        return ErrorResponse(
+            detail=str(e),
+            message=get_message("auth.forbidden", data.response_language),
+            error_code="PERMISSION_DENIED"
+        )
+
+    try:
+        result = await call_otp_verification(data, request, client_ip, context)
         log_info("OTP verified successfully", extra={
             "phone": result.get("phone"),
             "ip": client_ip,
@@ -98,31 +149,28 @@ async def verify_otp_endpoint(
             "request_id": data.request_id,
             "client_version": data.client_version,
             "device_fingerprint": data.device_fingerprint,
-            "user_agent": user_agent
+            "user_agent": request.headers.get("User-Agent", "Unknown")
         })
         return StandardResponse.success(
             data={key: val for key, val in result.items() if key != "message"},
-            message=result["message"]
+            message=result["message"],
+            code=status.HTTP_200_OK
         )
     except TooManyRequestsException as e:
-        log_error("Too many OTP attempts", extra={"error": str(e), "client_ip": client_ip})
-        return StandardResponse(
-            data=None,
-            meta=Meta(
-                message=get_message("otp.too_many.attempts", data.response_language),
-                status="error",
-                code=status.HTTP_429_TOO_MANY_REQUESTS
-            )
+        log_error("Too many OTP attempts", extra={"error": e.detail, "client_ip": client_ip})
+        return ErrorResponse(
+            detail=e.detail,
+            message=e.message,
+            error_code=e.error_code,
+            metadata=e.metadata
         )
     except BadRequestException as e:
-        log_error("Invalid OTP", extra={"error": str(e), "client_ip": client_ip})
-        return StandardResponse(
-            data=None,
-            meta=Meta(
-                message=get_message("otp.invalid", data.response_language),
-                status="error",
-                code=status.HTTP_400_BAD_REQUEST
-            )
+        log_error("Invalid OTP", extra={"error": e.detail, "client_ip": client_ip})
+        return ErrorResponse(
+            detail=e.detail,
+            message=e.message,
+            error_code=e.error_code,
+            metadata=e.metadata
         )
     except Exception as e:
         log_error("Failed to verify OTP", extra={
@@ -131,11 +179,8 @@ async def verify_otp_endpoint(
             "temporary_token": data.temporary_token[:10] + "...",
             "client_ip": client_ip
         })
-        return StandardResponse(
-            data=None,
-            meta=Meta(
-                message=get_message("server.error", data.response_language),
-                status="error",
-                code=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        return ErrorResponse(
+            detail=str(e),
+            message=get_message("server.error", data.response_language),
+            error_code="SERVER_ERROR"
         )

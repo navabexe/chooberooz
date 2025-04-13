@@ -1,10 +1,16 @@
 from dependency_injector import containers, providers
 from redis.asyncio import Redis
 from motor.motor_asyncio import AsyncIOMotorClient
+
 from src.shared.config.settings import settings
+
 from src.infrastructure.storage.cache.repositories.otp_repository import OTPRepository
 from src.infrastructure.storage.nosql.repositories.user_repository import UserRepository
+
+from src.domain.notification.services.notification_service import NotificationService
+from src.domain.authentication.services.session_service import SessionService
 from src.domain.authentication.services.otp_service import OTPService
+
 
 class Container(containers.DeclarativeContainer):
     """Dependency Injection container for managing application dependencies."""
@@ -37,7 +43,17 @@ class Container(containers.DeclarativeContainer):
     user_repo = providers.Factory(UserRepository, db=mongo_db)
 
     # Services
-    otp_service = providers.Factory(OTPService, otp_repo=otp_repo, user_repo=user_repo)
+    notification_service = providers.Singleton(NotificationService)
+    session_service = providers.Singleton(SessionService)
+
+    otp_service = providers.Factory(
+        OTPService,
+        otp_repo=otp_repo,
+        user_repo=user_repo,
+        notification_service=notification_service,
+        session_service=session_service
+    )
+
 
 # Create the container instance
 container = Container(config=settings)
