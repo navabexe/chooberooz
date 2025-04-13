@@ -23,6 +23,8 @@ class VerifyOTPModel(BaseRequestModel):
     request_id: Annotated[str | None, Field(default=None, description="Request identifier for tracing")]
     client_version: Annotated[str | None, Field(default=None, description="Version of the client app")]
     device_fingerprint: Annotated[str | None, Field(default=None, description="Device fingerprint")]
+    # device_fingerprint: Annotated[str, Field(description="Unique device fingerprint")]
+    
     role: str | None = None
     status: str | None = None
 

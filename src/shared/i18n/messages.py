@@ -1,5 +1,7 @@
 from typing import Dict, Optional, Literal
 
+from src.shared.utilities.logging import log_warning
+
 MESSAGES = {
     # OTP-related messages
     "otp.invalid": {
@@ -343,15 +345,14 @@ MESSAGES = {
 }
 
 
-def get_message(key: str, lang: Literal["fa", "en"] = "fa",
-                variables: Optional[Dict[str, int | str]] = None) -> str | dict | None:
-    """Retrieve a localized message based on key and language, with optional variable substitution."""
+def get_message(key: str, lang: Literal["fa", "en"] = "fa", variables: Optional[Dict[str, int | str]] = None) -> str | dict | None:
     message = MESSAGES.get(key, {}).get(lang) or MESSAGES.get(key, {}).get("en") or key
     if variables and isinstance(message, str):
         try:
             return message.format(**variables)
-        except (KeyError, ValueError):
+        except (KeyError, ValueError) as e:
+            log_warning("Failed to format i18n message", extra={"key": key, "lang": lang, "variables": variables, "error": str(e)})
             return message
     if isinstance(message, dict):
-        return message  # For messages with title/body structure
+        return message
     return message
