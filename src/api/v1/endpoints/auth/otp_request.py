@@ -1,11 +1,10 @@
 from typing import Annotated, Coroutine, Any, Union
 from fastapi import APIRouter, Request, Depends, status
-from pyasn1.compat.octets import null
 from pydantic import BaseModel, Field
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from src.shared.config.settings import settings
-from src.shared.utilities.network import get_client_ip
+from src.shared.utilities.network import extract_client_ip
 from src.shared.utilities.logging import log_info, log_error
 from src.shared.models.responses.base import StandardResponse, ErrorResponse
 from src.shared.i18n.messages import get_message
@@ -52,7 +51,8 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
             db=context["db"],
             request_id=data.request_id,
             client_version=data.client_version,
-            device_fingerprint=data.device_fingerprint
+            device_fingerprint=data.device_fingerprint,
+            user_agent=request.headers.get("User-Agent", "Unknown")
         )
         log_info("OTP request successful", extra={
             "phone": data.phone,
@@ -108,7 +108,21 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
                         "message": "Please try again later.",
                         "error_code": "OTP_RATE_LIMIT",
                         "status": "error",
-                        "metadata": null
+                        "metadata": {"remaining_attempts": 0}
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Device mismatch detected",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Suspicious device detected.",
+                        "message": "Device mismatch detected.",
+                        "error_code": "DEVICE_MISMATCH",
+                        "status": "error",
+                        "metadata": {}
                     }
                 }
             }
@@ -118,7 +132,7 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
 async def request_otp_endpoint(
     data: RequestOTPInput,
     request: Request,
-    client_ip: Annotated[str, Depends(get_client_ip)],
+    client_ip: Annotated[str, Depends(extract_client_ip)],
     context: dict = Depends(check_database_connection),
 ) -> Union[StandardResponse, ErrorResponse]:
     """Request an OTP for authentication."""

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 from src.shared.utilities.validators import validate_and_format_phone
 from src.shared.config.settings import settings
 
+
 class RequestOTPInput(BaseModel):
     """Request model for requesting an OTP code."""
     phone: str = Field(..., min_length=10, max_length=15, description="Phone number in international format (e.g., +989123456789)")
@@ -14,6 +15,7 @@ class RequestOTPInput(BaseModel):
     request_id: Optional[str] = Field(default=None, max_length=36, description="Request identifier for tracing")
     client_version: Optional[str] = Field(default=None, max_length=15, description="Version of the client app")
     device_fingerprint: Optional[str] = Field(default=None, max_length=100, description="Unique device fingerprint (optional)")
+
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
     @field_validator("phone")
@@ -47,10 +49,18 @@ class RequestOTPInput(BaseModel):
             raise ValueError("Invalid client version format. Expected format: X.Y.Z.")
         return v
 
+    @field_validator("device_fingerprint")
+    @classmethod
+    def validate_device_fingerprint(cls, v: Optional[str]) -> Optional[str]:
+        if v and not re.match(r"^[a-zA-Z0-9\-_]{1,100}$", v):
+            raise ValueError("Invalid device fingerprint format. Use alphanumeric characters, hyphens, or underscores.")
+        return v
+
+
 class OTP(BaseModel):
     """Model representing an OTP (One-Time Password) entity."""
     phone: str = Field(..., max_length=15, description="Phone number associated with the OTP")
-    code: str = Field(..., description="Generated OTP code")
+    code: str = Field(..., min_length=4, max_length=10, description="Generated OTP code")
     purpose: str = Field(default="login", description="Purpose of the OTP (e.g., login, signup)")
     attempts: int = Field(default=0, ge=0, description="Number of verification attempts")
     channel: Optional[str] = Field(default="sms", description="Delivery channel (e.g., sms, email)")
@@ -61,8 +71,23 @@ class OTP(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="Creation time of the OTP"
     )
+
     model_config = ConfigDict(
         json_encoders={
             datetime: lambda v: v.isoformat()
         }
     )
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        if not v.isdigit():
+            raise ValueError("OTP code must contain only digits.")
+        return v
+
+    @field_validator("device_fingerprint")
+    @classmethod
+    def validate_device_fingerprint(cls, v: Optional[str]) -> Optional[str]:
+        if v and not re.match(r"^[a-zA-Z0-9\-_]{1,100}$", v):
+            raise ValueError("Invalid device fingerprint format. Use alphanumeric characters, hyphens, or underscores.")
+        return v

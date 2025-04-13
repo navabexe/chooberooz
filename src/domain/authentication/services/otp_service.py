@@ -1,6 +1,7 @@
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
+from typing import Optional
 from fastapi import Request
 from enum import Enum
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -13,7 +14,7 @@ from src.shared.errors.base import BadRequestException, TooManyRequestsException
 from src.shared.i18n.messages import get_message
 from src.shared.security.token import decode_token, generate_temp_token
 from src.shared.utilities.logging import create_log_data, log_info, log_error
-from src.shared.utilities.network import extract_client_ip, parse_user_agent
+from src.shared.utilities.network import extract_client_ip, parse_user_agent, get_location_from_ip
 from src.shared.utilities.text import generate_otp_code
 from src.shared.utilities.time import utc_now
 from src.domain.notification.services.notification_service import NotificationService
@@ -47,13 +48,52 @@ def get_otp_keys(role: str, phone: str, jti: str) -> dict:
         "temp_token_key": f"temp_token:{jti}",
         "used_token_key": f"temp_token_used:{phone}",
         "attempt_key": f"otp-attempts:{role}:{phone}",
+        "expired_attempt_key": f"otp-expired-attempts:{role}:{phone}",
+        "token_expired_attempt_key": f"token-expired-attempts:{role}:{phone}",
         "block_key": f"otp-blocked:{role}:{phone}"
     }
 
 
+class OTPNotifier:
+    def __init__(self, notification_service: NotificationService):
+        self.notification_service = notification_service
+
+    async def send_otp(self, phone: str, role: str, otp_code: str, purpose: str, language: str, db: AsyncIOMotorDatabase) -> bool:
+        """Send OTP notification to the user."""
+        try:
+            result = await self.notification_service.send(
+                receiver_id=phone,
+                receiver_type=role,
+                template_key="otp_requested",
+                variables={"phone": phone, "otp": otp_code, "purpose": purpose},
+                reference_type="otp",
+                reference_id=phone,
+                language=language,
+                return_bool=True,
+                additional_receivers=[{"id": "admin", "type": "admin"}],
+                db=db
+            )
+            log_info("OTP notification sent", extra={"phone": phone, "role": role, "purpose": purpose})
+            return result
+        except Exception as e:
+            log_error("Failed to send OTP notification", extra={"error": str(e), "phone": phone})
+            return False
+
+    async def send_verified(self, phone: str, role: str, language: str, db: AsyncIOMotorDatabase) -> bool:
+        """Send notification after OTP verification."""
+        try:
+            result = await self.notification_service.send_otp_verified(phone, role, language, db=db)
+            log_info("OTP verified notification sent", extra={"phone": phone, "role": role})
+            return result
+        except Exception as e:
+            log_error("Failed to send verified notification", extra={"error": str(e), "phone": phone})
+            return False
+
+
 class OTPStorageHandler:
-    def __init__(self, otp_repo: OTPRepository):
+    def __init__(self, otp_repo: OTPRepository, notifier: OTPNotifier):
         self.otp_repo = otp_repo
+        self.notifier = notifier
 
     async def store(self, phone: str, role: str, otp_hash: str, jti: str, language: str):
         """Store OTP-related data in Redis."""
@@ -94,7 +134,11 @@ class OTPStorageHandler:
                 language=language
             )
 
-    async def validate(self, otp: str, jti: str, phone: str, role: str, language: str) -> bool:
+    async def validate(
+        self, otp: str, jti: str, phone: str, role: str, language: str, db: AsyncIOMotorDatabase,
+        client_ip: str = "unknown", request_id: str = "unknown", client_version: str = "unknown",
+        device_fingerprint: Optional[str] = None, user_agent: str = "unknown"
+    ) -> bool:
         """Validate OTP against stored data."""
         try:
             keys = get_otp_keys(role, phone, jti)
@@ -105,16 +149,54 @@ class OTPStorageHandler:
                 "temp_token_key": keys["temp_token_key"],
                 "phone": phone,
                 "role": role,
-                "jti": jti
+                "jti": jti,
+                "client_ip": client_ip
             })
+
             if not stored_otp or not stored_phone:
-                log_error("OTP expired or missing", extra=keys)
+                attempts = await self.otp_repo.incr(keys["expired_attempt_key"])
+                await self.otp_repo.expire(keys["expired_attempt_key"], settings.OTP_ATTEMPT_EXPIRY or 3600)
+                log_error("OTP expired or missing", extra={**keys, "expired_attempts": attempts})
+
+                await OTPLogger(self.otp_repo).log_failed_attempt(
+                    phone=phone,
+                    role=role,
+                    reason="OTP_EXPIRED",
+                    client_ip=client_ip,
+                    request_id=request_id,
+                    client_version=client_version,
+                    device_fingerprint=device_fingerprint,
+                    user_agent=user_agent
+                )
+
+                if attempts >= settings.MAX_OTP_EXPIRED_ATTEMPTS:
+                    await self.otp_repo.setex(keys["block_key"], settings.BLOCK_DURATION_OTP, "1")
+                    log_error("Blocked due to too many expired OTP attempts", extra={"phone": phone, "attempts": attempts})
+                    await self.notifier.notification_service.send(
+                        receiver_id="admin",
+                        receiver_type="admin",
+                        template_key="notification_failed",
+                        variables={"receiver_id": phone, "error": "Too many expired OTP attempts", "type": "security"},
+                        reference_type="otp",
+                        reference_id=phone,
+                        language=language,
+                        db=db
+                    )
+                    raise TooManyRequestsException(
+                        detail="Too many attempts with expired OTP.",
+                        message=get_message("otp.too_many.attempts", language),
+                        error_code="OTP_EXPIRED_RATE_LIMIT",
+                        language=language
+                    )
+
                 raise BadRequestException(
                     detail=f"OTP expired or missing for phone {phone}.",
                     message=get_message("otp.expired", language),
                     error_code="OTP_EXPIRED",
-                    language=language
+                    language=language,
+                    metadata={"remaining_attempts": settings.MAX_OTP_EXPIRED_ATTEMPTS - attempts}
                 )
+
             if stored_phone != phone or hash_otp(otp) != stored_otp:
                 log_error("OTP mismatch", extra={
                     "expected_phone": stored_phone,
@@ -140,6 +222,8 @@ class OTPStorageHandler:
             await self.otp_repo.delete(keys["otp_key"])
             await self.otp_repo.delete(keys["temp_token_key"])
             await self.otp_repo.delete(keys["attempt_key"])
+            await self.otp_repo.delete(keys["expired_attempt_key"])
+            await self.otp_repo.delete(keys["token_expired_attempt_key"])
             log_info("Cleared OTP keys", extra={"otp_key": keys["otp_key"], "phone": phone, "role": role})
         except RedisConnectionError as e:
             log_error("Redis connection failed during OTP clear", extra={"error": str(e)})
@@ -151,73 +235,56 @@ class OTPStorageHandler:
             )
 
 
-class OTPNotifier:
-    def __init__(self, notification_service: NotificationService):
-        self.notification_service = notification_service
-
-    async def send_otp(self, phone: str, role: str, otp_code: str, purpose: str, language: str, db: AsyncIOMotorDatabase) -> bool:
-        """Send OTP notification to the user."""
-        try:
-            result = await self.notification_service.send(
-                receiver_id=phone,
-                receiver_type=role,
-                template_key="otp_requested",
-                variables={"phone": phone, "otp": otp_code, "purpose": purpose},
-                reference_type="otp",
-                reference_id=phone,
-                language=language,
-                return_bool=True,
-                additional_receivers=[{"id": "admin", "type": "admin"}],
-                db=db
-            )
-            log_info("OTP notification sent", extra={"phone": phone, "role": role, "purpose": purpose})
-            return result
-        except Exception as e:
-            log_error("Failed to send OTP notification", extra={"error": str(e), "phone": phone})
-            return False
-
-    async def send_verified(self, phone: str, role: str, language: str, db: AsyncIOMotorDatabase) -> bool:
-        """Send notification after OTP verification."""
-        try:
-            result = await self.notification_service.send_otp_verified(phone, role, language, db=db)
-            log_info("OTP verified notification sent", extra={"phone": phone, "role": role})
-            return result
-        except Exception as e:
-            log_error("Failed to send verified notification", extra={"error": str(e), "phone": phone})
-            return False
-
-
 class OTPLogger:
     def __init__(self, user_repo: UserRepository):
         self.user_repo = user_repo
 
     async def log_request(
         self, phone: str, role: str, purpose: str, request: Request, request_id: str, client_version: str,
-        device_fingerprint: str, jti: str, otp_code: str
+        device_fingerprint: Optional[str], jti: str, otp_code: str
     ):
         """Log OTP request event."""
         client_ip = await extract_client_ip(request)
+        location = await get_location_from_ip(client_ip)
         agent = parse_user_agent(request.headers.get("User-Agent", "Unknown"))
         log_data = create_log_data("otp", phone, "requested", client_ip, request_id, client_version, device_fingerprint, {
             "role": role,
             "purpose": purpose,
             "jti": jti,
             "otp": otp_code if settings.ENVIRONMENT == "development" else None,
+            "location": location,
             **agent
         })
         await self.user_repo.log_audit("otp_requested", log_data)
 
     async def log_verified(
         self, phone: str, role: str, status: str, user_id: str, client_ip: str, request_id: str,
-        client_version: str, device_fingerprint: str
+        client_version: str, device_fingerprint: Optional[str]
     ):
         """Log OTP verification event."""
+        location = await get_location_from_ip(client_ip)
         log_data = create_log_data("otp", phone, "verified", client_ip, request_id, client_version, device_fingerprint, {
             "role": role,
             "status": status,
-            "user_id": user_id
+            "user_id": user_id,
+            "location": location
         })
         await self.user_repo.log_audit("otp_verified", log_data)
+
+    async def log_failed_attempt(
+        self, phone: str, role: str, reason: str, client_ip: str, request_id: str, client_version: str,
+        device_fingerprint: Optional[str], user_agent: str
+    ):
+        """Log failed OTP attempt."""
+        location = await get_location_from_ip(client_ip)
+        agent = parse_user_agent(user_agent)
+        log_data = create_log_data("otp", phone, "failed", client_ip, request_id, client_version, device_fingerprint, {
+            "role": role,
+            "reason": reason,
+            "location": location,
+            **agent
+        })
+        await self.user_repo.log_audit("otp_failed", log_data)
 
 
 class OTPService(BaseService):
@@ -228,11 +295,12 @@ class OTPService(BaseService):
         notification_service: NotificationService,
         session_service: SessionService
     ):
+        super().__init__()
         self.otp_repo = otp_repo
         self.user_repo = user_repo
         self.notifier = OTPNotifier(notification_service)
         self.logger = OTPLogger(user_repo)
-        self.storage = OTPStorageHandler(otp_repo)
+        self.storage = OTPStorageHandler(otp_repo, self.notifier)
         self.session_service = session_service
 
     async def generate_otp_and_token(self, phone: str, role: str, language: str) -> tuple[str, str, str]:
@@ -261,7 +329,7 @@ class OTPService(BaseService):
         db: AsyncIOMotorDatabase = None,
         request_id: str = None,
         client_version: str = None,
-        device_fingerprint: str = None,
+        device_fingerprint: Optional[str] = None,
         user_agent: str = "Unknown"
     ) -> dict:
         """Request an OTP and send it to the user."""
@@ -275,6 +343,23 @@ class OTPService(BaseService):
 
         async def operation():
             await check_rate_limits(phone, role, self.otp_repo, language)
+
+            # مدیریت device_fingerprint
+            device_key = f"device:{role}:{phone}"
+            if device_fingerprint:
+                stored_device = await self.otp_repo.get(device_key)
+                if stored_device and stored_device != device_fingerprint:
+                    log_error("Device fingerprint mismatch", extra={"phone": phone, "stored_device": stored_device})
+                    raise BadRequestException(
+                        detail="Suspicious device detected.",
+                        message=get_message("device.mismatch", language),
+                        error_code="DEVICE_MISMATCH",
+                        language=language
+                    )
+                await self.otp_repo.setex(device_key, settings.OTP_EXPIRY, device_fingerprint)
+            else:
+                log_info("No device fingerprint provided", extra={"phone": phone})
+
             otp_code, temp_token, jti = await self.generate_otp_and_token(phone, role, language)
             await self.storage.store(phone, role, hash_otp(otp_code), jti, language)
             await self.logger.log_request(phone, role, purpose, request, request_id, client_version, device_fingerprint, jti, otp_code)
@@ -396,7 +481,7 @@ class OTPService(BaseService):
         keys = get_otp_keys(role, phone, jti)
         try:
             attempts = await self.otp_repo.incr(keys["attempt_key"])
-            await self.otp_repo.expire(keys["attempt_key"], 600)
+            await self.otp_repo.expire(keys["attempt_key"], settings.OTP_ATTEMPT_EXPIRY or 3600)
             log_info("Incremented OTP attempt", extra={"phone": phone, "attempts": attempts})
 
             if int(attempts) >= settings.MAX_OTP_ATTEMPTS:
@@ -430,7 +515,7 @@ class OTPService(BaseService):
         except RedisConnectionError as e:
             log_error("Redis connection failed during attempt tracking", extra={"error": str(e)})
             raise BadRequestException(
-                detail="Redis_Action unavailable.",
+                detail="Redis unavailable.",
                 message=get_message("server.error", language),
                 error_code="REDIS_ERROR",
                 language=language
@@ -446,7 +531,7 @@ class OTPService(BaseService):
         db: AsyncIOMotorDatabase = None,
         request_id: str = None,
         client_version: str = None,
-        device_fingerprint: str = None,
+        device_fingerprint: Optional[str] = None,
         user_agent: str = "Unknown"
     ) -> dict:
         """Verify the OTP and create or update user session."""
@@ -474,7 +559,53 @@ class OTPService(BaseService):
                     language=language
                 )
 
-            if await self.otp_repo.get(get_otp_keys(role, phone, jti)["block_key"]):
+            keys = get_otp_keys(role, phone, jti)
+            temp_token_key = keys["temp_token_key"]
+            if not await self.otp_repo.get(temp_token_key):
+                attempts = await self.otp_repo.incr(keys["token_expired_attempt_key"])
+                await self.otp_repo.expire(keys["token_expired_attempt_key"], settings.OTP_ATTEMPT_EXPIRY or 3600)
+                log_error("Temporary token missing or expired", extra={"jti": jti, "phone": phone, "attempts": attempts})
+
+                await self.logger.log_failed_attempt(
+                    phone=phone,
+                    role=role,
+                    reason="TOKEN_EXPIRED",
+                    client_ip=client_ip,
+                    request_id=request_id,
+                    client_version=client_version,
+                    device_fingerprint=device_fingerprint,
+                    user_agent=user_agent
+                )
+
+                if attempts >= settings.MAX_TOKEN_EXPIRED_ATTEMPTS:
+                    await self.otp_repo.setex(keys["block_key"], settings.BLOCK_DURATION_OTP, "1")
+                    log_error("Blocked due to too many token expired attempts", extra={"phone": phone, "attempts": attempts})
+                    await self.notifier.notification_service.send(
+                        receiver_id="admin",
+                        receiver_type="admin",
+                        template_key="notification_failed",
+                        variables={"receiver_id": phone, "error": "Too many token expired attempts", "type": "security"},
+                        reference_type="otp",
+                        reference_id=phone,
+                        language=language,
+                        db=db
+                    )
+                    raise TooManyRequestsException(
+                        detail="Too many attempts with expired token.",
+                        message=get_message("token.too_many.attempts", language),
+                        error_code="TOKEN_EXPIRED_RATE_LIMIT",
+                        language=language
+                    )
+
+                raise BadRequestException(
+                    detail="Temporary token is invalid or expired.",
+                    message=get_message("token.invalid", language),
+                    error_code="TOKEN_EXPIRED",
+                    language=language,
+                    metadata={"remaining_attempts": settings.MAX_TOKEN_EXPIRED_ATTEMPTS - attempts}
+                )
+
+            if await self.otp_repo.get(keys["block_key"]):
                 raise TooManyRequestsException(
                     detail=get_message("otp.too_many.attempts", language),
                     message=get_message("otp.too_many.attempts", language),
@@ -482,7 +613,19 @@ class OTPService(BaseService):
                     language=language
                 )
 
-            is_valid = await self.storage.validate(otp=otp, jti=jti, phone=phone, role=role, language=language)
+            is_valid = await self.storage.validate(
+                otp=otp,
+                jti=jti,
+                phone=phone,
+                role=role,
+                language=language,
+                db=db,
+                client_ip=client_ip,
+                request_id=request_id,
+                client_version=client_version,
+                device_fingerprint=device_fingerprint,
+                user_agent=user_agent
+            )
             if not is_valid:
                 await self.handle_failed_verification(otp, temporary_token, phone, role, language, db)
                 return {}  # خطا توسط handle_failed_verification پرتاب شده است

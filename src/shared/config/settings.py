@@ -10,7 +10,7 @@ ENV_PATH = BASE_DIR / ".env"
 
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str = Field(default="development", description="Application environment")
     BASE_DIR: Path = Field(default=BASE_DIR, description="Base directory of the project")
 
     # Security keys
@@ -27,13 +27,16 @@ class Settings(BaseSettings):
     ACCESS_TTL: int = Field(900, description="Access token TTL in seconds")
     REFRESH_TTL: int = Field(86400, description="Refresh token TTL in seconds")
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(30, description="Refresh token expiry in days")
+    TEMP_TOKEN_EXPIRY: int = Field(86400, description="Temporary token expiry time in seconds")
     TEMP_TOKEN_EXPIRE_MINUTES: int = Field(300, description="Temporary token expiry in minutes")
     OTP_EXPIRY: int = Field(300, description="OTP expiry time in seconds")
     BLOCK_DURATION: int = Field(3600, description="General block duration in seconds")
     MAX_OTP_ATTEMPTS: int = Field(5, description="Maximum OTP attempts allowed")
     BLOCK_DURATION_OTP: int = Field(600, description="OTP block duration in seconds")
     SESSION_EXPIRY: int = Field(86400, description="Session expiry time in seconds")
-    TEMP_TOKEN_EXPIRY: int = Field(86400, description="Temporary token expiry time in seconds")
+    MAX_OTP_EXPIRED_ATTEMPTS: int = Field(5, description="Maximum attempts for expired OTP")
+    MAX_TOKEN_EXPIRED_ATTEMPTS: int = Field(5, description="Maximum attempts for expired token")
+    OTP_ATTEMPT_EXPIRY: int = Field(3600, description="Expiry time for OTP attempt keys in seconds")
 
     # MongoDB
     MONGO_URI: str = Field("mongodb://localhost:27017", description="MongoDB connection URI")
@@ -85,7 +88,7 @@ class Settings(BaseSettings):
     VALID_VISIBILITY: List[str] = Field(["COLLABORATIVE", "PUBLIC", "PRIVATE", "TEMPORARILY_CLOSED"], description="Valid visibility options for vendors")
     VALID_VENDOR_TYPES: List[str] = Field(["BASIC", "PRO"], description="Valid vendor types")
 
-    CORS_ORIGINS: str = "http://localhost:3000"
+    CORS_ORIGINS: str = Field("http://localhost:3000", description="Comma-separated list of allowed CORS origins")
 
     # Language settings
     DEFAULT_LANGUAGE: str = Field("fa", description="Default language for responses")

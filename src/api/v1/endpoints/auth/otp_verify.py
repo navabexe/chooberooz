@@ -4,7 +4,7 @@ from pydantic import Field, field_validator
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from src.shared.config.settings import settings
-from src.shared.utilities.network import get_client_ip
+from src.shared.utilities.network import extract_client_ip
 from src.shared.utilities.logging import log_info, log_error
 from src.shared.models.requests.base import BaseRequestModel
 from src.shared.models.responses.base import StandardResponse, ErrorResponse
@@ -106,13 +106,27 @@ async def call_otp_verification(data: VerifyOTPModel, request: Request, client_i
                     }
                 }
             }
+        },
+        429: {
+            "description": "Too many attempts with expired OTP or token",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Too many attempts with expired token.",
+                        "message": "Please try again later.",
+                        "error_code": "TOKEN_EXPIRED_RATE_LIMIT",
+                        "status": "error",
+                        "metadata": {"remaining_attempts": 0}
+                    }
+                }
+            }
         }
     }
 )
 async def verify_otp_endpoint(
     data: VerifyOTPModel,
     request: Request,
-    client_ip: Annotated[str, Depends(get_client_ip)],
+    client_ip: Annotated[str, Depends(extract_client_ip)],
     context: dict = Depends(check_database_connection),
 ) -> Union[StandardResponse, ErrorResponse]:
     """Verify an OTP and proceed with authentication."""
