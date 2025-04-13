@@ -34,6 +34,10 @@ MESSAGES = {
         "fa": "کد تایید با موفقیت تأیید شد.",
         "en": "OTP has been successfully verified."
     },
+    "invalid.otp_code": {
+        "fa": "کد تایید باید فقط شامل اعداد باشد.",
+        "en": "OTP code must contain only digits."
+    },
 
     # Authentication-related messages
     "auth.login.success": {
@@ -182,7 +186,7 @@ MESSAGES = {
         "en": {"title": "Security Alert",
                "body": "Suspicious activity for user {user_id} from IP {ip} with {count} sessions and {ip_count} IPs"}
     },
-    "sessions.active_retrieved": {
+    "sessions.active_retrieved":{
         "fa": "جلسات فعال با موفقیت بازیابی شدند.",
         "en": "Active sessions retrieved successfully."
     },
@@ -278,15 +282,31 @@ MESSAGES = {
         "fa": "وضعیت کاربر نامعتبر است.",
         "en": "Invalid user status."
     },
+    "invalid.phone": {
+        "fa": "شماره تلفن نامعتبر است.",
+        "en": "Invalid phone number."
+    },
+    "invalid.language": {
+        "fa": "زبان پشتیبانی‌نشده است. زبان‌های مجاز: {allowed}",
+        "en": "Unsupported language. Allowed: {allowed}"
+    },
+    "invalid.request_id": {
+        "fa": "شناسه درخواست بیش از حد طولانی است.",
+        "en": "Request identifier is too long."
+    },
+    "invalid.client_version": {
+        "fa": "فرمت نسخه کلاینت نامعتبر است. فرمت مورد انتظار: X.Y.Z",
+        "en": "Invalid client version format. Expected format: X.Y.Z."
+    },
+    "invalid.device_fingerprint": {
+        "fa": "فرمت اثر انگشت دستگاه نامعتبر است. از کاراکترهای الفبایی، عددی، خط تیره یا زیرخط استفاده کنید.",
+        "en": "Invalid device fingerprint format. Use alphanumeric characters, hyphens, or underscores."
+    },
 
     # Device-related messages
     "device.mismatch": {
         "fa": "دستگاه مشکوک شناسایی شد.",
         "en": "Suspicious device detected."
-    },
-    "invalid.device_fingerprint": {
-        "fa": "فرمت اثر انگشت دستگاه نامعتبر است.",
-        "en": "Invalid device fingerprint format."
     },
 
     # Profile-related messages
@@ -315,12 +335,16 @@ MESSAGES = {
     "csrf.invalid": {
         "fa": "توکن CSRF معتبر نیست یا منقضی شده است.",
         "en": "CSRF token is invalid or expired."
-    }
+    },
+"otp.too_many.blocked": {
+    "fa": "به دلیل تعداد بالای درخواست، موقتاً مسدود شده‌اید.",
+    "en": "You are temporarily blocked due to too many requests."
+}
 }
 
 
 def get_message(key: str, lang: Literal["fa", "en"] = "fa",
-                variables: Optional[Dict[str, int | str]] = None) -> str | None:
+                variables: Optional[Dict[str, int | str]] = None) -> str | dict | None:
     """Retrieve a localized message based on key and language, with optional variable substitution."""
     message = MESSAGES.get(key, {}).get(lang) or MESSAGES.get(key, {}).get("en") or key
     if variables and isinstance(message, str):

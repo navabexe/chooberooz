@@ -4,6 +4,7 @@ from typing import Optional, Literal
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from src.shared.utilities.validators import validate_and_format_phone
 from src.shared.config.settings import settings
+from src.shared.i18n.messages import get_message
 
 
 class RequestOTPInput(BaseModel):
@@ -24,36 +25,40 @@ class RequestOTPInput(BaseModel):
         try:
             formatted = validate_and_format_phone(v)
             return formatted
-        except ValueError as e:
-            raise ValueError(f"Invalid phone number: {str(e)}")
+        except ValueError:
+            raise ValueError(get_message("invalid.phone", lang=settings.DEFAULT_LANGUAGE))
 
     @field_validator("response_language")
     @classmethod
     def validate_language(cls, v: str) -> str:
         allowed = settings.SUPPORTED_LANGUAGES.split(",")
         if v not in allowed:
-            raise ValueError(f"Unsupported language. Allowed: {', '.join(allowed)}.")
+            raise ValueError(get_message(
+                "invalid.language",
+                lang=settings.DEFAULT_LANGUAGE,
+                variables={"allowed": ", ".join(allowed)}
+            ))
         return v
 
     @field_validator("request_id")
     @classmethod
     def validate_request_id(cls, v: Optional[str]) -> Optional[str]:
         if v and len(v) > 36:
-            raise ValueError("Request identifier is too long.")
+            raise ValueError(get_message("invalid.request_id", lang=settings.DEFAULT_LANGUAGE))
         return v
 
     @field_validator("client_version")
     @classmethod
     def validate_client_version(cls, v: Optional[str]) -> Optional[str]:
         if v and (len(v) > 15 or not re.match(r"^\d+\.\d+\.\d+$", v)):
-            raise ValueError("Invalid client version format. Expected format: X.Y.Z.")
+            raise ValueError(get_message("invalid.client_version", lang=settings.DEFAULT_LANGUAGE))
         return v
 
     @field_validator("device_fingerprint")
     @classmethod
     def validate_device_fingerprint(cls, v: Optional[str]) -> Optional[str]:
         if v and not re.match(r"^[a-zA-Z0-9\-_]{1,100}$", v):
-            raise ValueError("Invalid device fingerprint format. Use alphanumeric characters, hyphens, or underscores.")
+            raise ValueError(get_message("invalid.device_fingerprint", lang=settings.DEFAULT_LANGUAGE))
         return v
 
 
@@ -82,12 +87,12 @@ class OTP(BaseModel):
     @classmethod
     def validate_code(cls, v: str) -> str:
         if not v.isdigit():
-            raise ValueError("OTP code must contain only digits.")
+            raise ValueError(get_message("invalid.otp_code", lang=settings.DEFAULT_LANGUAGE))
         return v
 
     @field_validator("device_fingerprint")
     @classmethod
     def validate_device_fingerprint(cls, v: Optional[str]) -> Optional[str]:
         if v and not re.match(r"^[a-zA-Z0-9\-_]{1,100}$", v):
-            raise ValueError("Invalid device fingerprint format. Use alphanumeric characters, hyphens, or underscores.")
+            raise ValueError(get_message("invalid.device_fingerprint", lang=settings.DEFAULT_LANGUAGE))
         return v
