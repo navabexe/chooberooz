@@ -341,7 +341,6 @@ async def check_refresh_token_reuse(user_id: str, jti: str, redis: Redis) -> Non
                 log_error("Failed to check refresh token reuse, assuming valid", extra={"jti": jti, "error": str(e)})
                 return
 
-
 async def decode_token(
     token: str,
     token_type: str = "access",
