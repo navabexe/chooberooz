@@ -188,7 +188,7 @@ MESSAGES = {
         "en": {"title": "Security Alert",
                "body": "Suspicious activity for user {user_id} from IP {ip} with {count} sessions and {ip_count} IPs"}
     },
-    "sessions.active_retrieved":{
+    "sessions.active_retrieved": {
         "fa": "جلسات فعال با موفقیت بازیابی شدند.",
         "en": "Active sessions retrieved successfully."
     },
@@ -338,20 +338,46 @@ MESSAGES = {
         "fa": "توکن CSRF معتبر نیست یا منقضی شده است.",
         "en": "CSRF token is invalid or expired."
     },
-"otp.too_many.blocked": {
-    "fa": "به دلیل تعداد بالای درخواست، موقتاً مسدود شده‌اید.",
-    "en": "You are temporarily blocked due to too many requests."
-}
+    "otp.too_many.blocked": {
+        "fa": "به دلیل تعداد بالای درخواست، موقتاً مسدود شده‌اید.",
+        "en": "You are temporarily blocked due to too many requests."
+    },
+    "mongo.insert.failed": {
+        "en": "Failed to insert data into database.",
+        "fa": "خطا در درج اطلاعات در پایگاه داده."
+    },
+    "mongo.find_one.failed": {
+        "en": "Failed to retrieve data from database.",
+        "fa": "خطا در بازیابی اطلاعات از پایگاه داده."
+    },
+    "mongo.update.failed": {
+        "en": "Failed to update database record.",
+        "fa": "خطا در به‌روزرسانی رکورد پایگاه داده."
+    },
+    "mongo.find.failed": {
+        "en": "Failed to search database records.",
+        "fa": "خطا در جستجوی رکوردهای پایگاه داده."
+    },
+    "mongo.paginate.failed": {
+        "en": "Failed to paginate data.",
+        "fa": "خطا در صفحه‌بندی اطلاعات."
+    },
+    "mongo.delete.failed": {
+        "en": "Failed to delete record from database.",
+        "fa": "خطا در حذف رکورد از پایگاه داده."
+    },
 }
 
 
-def get_message(key: str, lang: Literal["fa", "en"] = "fa", variables: Optional[Dict[str, int | str]] = None) -> str | dict | None:
+def get_message(key: str, lang: Literal["fa", "en"] = "fa",
+                variables: Optional[Dict[str, int | str]] = None) -> str | dict | None:
     message = MESSAGES.get(key, {}).get(lang) or MESSAGES.get(key, {}).get("en") or key
     if variables and isinstance(message, str):
         try:
             return message.format(**variables)
         except (KeyError, ValueError) as e:
-            log_warning("Failed to format i18n message", extra={"key": key, "lang": lang, "variables": variables, "error": str(e)})
+            log_warning("Failed to format i18n message",
+                        extra={"key": key, "lang": lang, "variables": variables, "error": str(e)})
             return message
     if isinstance(message, dict):
         return message

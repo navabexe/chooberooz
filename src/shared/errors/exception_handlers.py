@@ -1,3 +1,4 @@
+# path: src/shared/errors/exception_handlers.py
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -5,14 +6,12 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_500_INTERNAL_SERVER_ERROR
 
 from src.shared.utilities.logging import log_error
-from src.shared.models.responses.base import ErrorResponse  # مدل بهبودیافته
+from src.shared.models.responses.base import ErrorResponse
 from src.shared.i18n.messages import get_message
 from src.shared.errors.base import AppHTTPException
-
+from src.shared.utilities.language import extract_language
 
 def register_exception_handlers(app: FastAPI):
-    """Register global exception handlers for all expected error types."""
-
     def build_error_response(
             status_code: int,
             detail: str,
@@ -20,19 +19,6 @@ def register_exception_handlers(app: FastAPI):
             error_code: Optional[str] = None,
             metadata: Optional[Dict[str, Any]] = None
     ):
-        """
-        Build a standardized JSON error response.
-
-        Args:
-            status_code: HTTP status code (e.g., 400, 500).
-            detail: Technical error description.
-            message: User-friendly error message (optional, defaults to detail).
-            error_code: Unique error code (optional).
-            metadata: Additional error information (optional).
-
-        Returns:
-            JSONResponse with ErrorResponse model.
-        """
         return JSONResponse(
             status_code=status_code,
             content=ErrorResponse(
@@ -46,8 +32,7 @@ def register_exception_handlers(app: FastAPI):
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        """Handles Pydantic validation errors (e.g., missing fields, wrong types)."""
-        language = request.query_params.get("response_language", "en")
+        language = extract_language(request)
         errors = exc.errors()
         details = []
         for err in errors:
@@ -73,8 +58,7 @@ def register_exception_handlers(app: FastAPI):
 
     @app.exception_handler(AppHTTPException)
     async def custom_http_exception_handler(request: Request, exc: AppHTTPException):
-        """Handles custom HTTP exceptions defined in src.shared.errors.base."""
-        language = exc.language or request.query_params.get("response_language", "en")
+        language = exc.language or extract_language(request)
         log_error("Custom HTTPException caught", extra={
             "path": request.url.path,
             "method": request.method,
@@ -95,8 +79,7 @@ def register_exception_handlers(app: FastAPI):
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        """Handles standard HTTP exceptions not covered by AppHTTPException."""
-        language = request.query_params.get("response_language", "en")
+        language = extract_language(request)
         log_error("HTTPException caught", extra={
             "path": request.url.path,
             "method": request.method,
@@ -114,8 +97,7 @@ def register_exception_handlers(app: FastAPI):
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        """Handles uncaught general exceptions as a fallback."""
-        language = request.query_params.get("response_language", "en")
+        language = extract_language(request)
         log_error("Unhandled exception", extra={
             "path": request.url.path,
             "method": request.method,

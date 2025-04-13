@@ -1,3 +1,4 @@
+# path: src/infrastructure/storage/nosql/repositories/base.py
 from typing import Any, Dict, List, Optional, Tuple
 
 from bson import ObjectId
@@ -5,7 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from src.shared.errors.base import ServiceUnavailableException
 from src.shared.utilities.logging import log_info, log_error
-
+from src.shared.i18n.messages import get_message
 
 class MongoRepository:
     def __init__(self, db: AsyncIOMotorDatabase, collection_name: str):
@@ -18,7 +19,7 @@ class MongoRepository:
             return ObjectId(value)
         return value
 
-    async def insert_one(self, document: Dict[str, Any]) -> str:
+    async def insert_one(self, document: Dict[str, Any], language: str = "en") -> str:
         try:
             if "_id" in document and isinstance(document["_id"], str):
                 document["_id"] = self._convert_to_objectid(document["_id"])
@@ -28,9 +29,9 @@ class MongoRepository:
             return inserted_id
         except Exception as e:
             log_error("Mongo insert_one failed", extra={"collection": self.collection.name, "error": str(e)}, exc_info=True)
-            raise ServiceUnavailableException("Failed to insert document: Internal DB error")
+            raise ServiceUnavailableException(get_message("mongo.insert.failed", language))
 
-    async def find_one(self, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def find_one(self, query: Dict[str, Any], language: str = "en") -> Optional[Dict[str, Any]]:
         try:
             if "_id" in query:
                 query["_id"] = self._convert_to_objectid(query["_id"])
@@ -41,20 +42,20 @@ class MongoRepository:
             return result
         except Exception as e:
             log_error("Mongo find_one failed", extra={"collection": self.collection.name, "error": str(e)}, exc_info=True)
-            raise ServiceUnavailableException("Failed to find document: Internal DB error")
+            raise ServiceUnavailableException(get_message("mongo.find_one.failed", language))
 
-    async def update_one(self, query: Dict[str, Any], update: Dict[str, Any]) -> int:
+    async def update_one(self, query: Dict[str, Any], update: Dict[str, Any], language: str = "en") -> int:
         try:
             if "_id" in query:
                 query["_id"] = self._convert_to_objectid(query["_id"])
             result = await self.collection.update_one(query, {"$set": update})
-            log_info("Mongo update_one", extra={"collection": self.collection.name, "query": str(query), "modified": result.modified_count})
+            log_info("Mongo update_one", extra={"collection": self.collection.name, "query": str(query), "update": update, "modified": result.modified_count})
             return result.modified_count
         except Exception as e:
             log_error("Mongo update_one failed", extra={"collection": self.collection.name, "error": str(e)}, exc_info=True)
-            raise ServiceUnavailableException("Failed to update document: Internal DB error")
+            raise ServiceUnavailableException(get_message("mongo.update.failed", language))
 
-    async def find(self, query: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def find(self, query: Dict[str, Any], language: str = "en") -> List[Dict[str, Any]]:
         try:
             if "_id" in query:
                 query["_id"] = self._convert_to_objectid(query["_id"])
@@ -66,9 +67,9 @@ class MongoRepository:
             return result
         except Exception as e:
             log_error("Mongo find failed", extra={"collection": self.collection.name, "error": str(e)}, exc_info=True)
-            raise ServiceUnavailableException("Failed to fetch documents: Internal DB error")
+            raise ServiceUnavailableException(get_message("mongo.find.failed", language))
 
-    async def find_with_pagination(self, query: Dict[str, Any], skip: int = 0, limit: int = 10, sort: Optional[List[Tuple[str, int]]] = None) -> List[Dict[str, Any]]:
+    async def find_with_pagination(self, query: Dict[str, Any], skip: int = 0, limit: int = 10, sort: Optional[List[Tuple[str, int]]] = None, language: str = "en") -> List[Dict[str, Any]]:
         try:
             if "_id" in query:
                 query["_id"] = self._convert_to_objectid(query["_id"])
@@ -82,9 +83,9 @@ class MongoRepository:
             return result
         except Exception as e:
             log_error("Mongo find_with_pagination failed", extra={"collection": self.collection.name, "error": str(e)}, exc_info=True)
-            raise ServiceUnavailableException("Failed to paginate documents: Internal DB error")
+            raise ServiceUnavailableException(get_message("mongo.paginate.failed", language))
 
-    async def delete_one(self, query: Dict[str, Any]) -> int:
+    async def delete_one(self, query: Dict[str, Any], language: str = "en") -> int:
         try:
             if "_id" in query:
                 query["_id"] = self._convert_to_objectid(query["_id"])
@@ -93,4 +94,4 @@ class MongoRepository:
             return result.deleted_count
         except Exception as e:
             log_error("Mongo delete_one failed", extra={"collection": self.collection.name, "error": str(e)}, exc_info=True)
-            raise ServiceUnavailableException("Failed to delete document: Internal DB error")
+            raise ServiceUnavailableException(get_message("mongo.delete.failed", language))
