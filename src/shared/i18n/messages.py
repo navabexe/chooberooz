@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Literal
 
-
 MESSAGES = {
+    # OTP-related messages
     "otp.invalid": {
         "fa": "کد تایید اشتباه است.",
         "en": "The OTP code is incorrect."
@@ -26,13 +26,31 @@ MESSAGES = {
         "fa": "تعداد درخواست در ۱۰ دقیقه زیاد است。",
         "en": "Too many OTP requests in 10 minutes."
     },
-    "otp.too_many.blocked": {
+    "otp.too_many.attempts": {
         "fa": "به دلیل تعداد بالای درخواست، موقتاً مسدود شده‌اید.",
-        "en": "You are temporarily blocked due to too many requests."
+        "en": "You are temporarily blocked due to too many attempts."
     },
+    "otp.valid": {
+        "fa": "کد تایید با موفقیت تأیید شد.",
+        "en": "OTP has been successfully verified."
+    },
+
+    # Authentication-related messages
     "auth.login.success": {
         "fa": "ورود با موفقیت انجام شد.",
         "en": "Login successful."
+    },
+    "auth.login.success.user": {
+        "fa": "کاربر عزیز، خوش آمدید!",
+        "en": "Welcome, dear user!"
+    },
+    "auth.login.success.vendor": {
+        "fa": "فروشنده گرامی، ورود شما موفق بود!",
+        "en": "Hello Vendor, you have successfully logged in!"
+    },
+    "auth.login.success.admin": {
+        "fa": "ادمین محترم، به پنل مدیریت خوش آمدید!",
+        "en": "Admin, welcome to the admin panel!"
     },
     "auth.profile.incomplete": {
         "fa": "لطفاً پروفایل خود را تکمیل کنید.",
@@ -62,6 +80,10 @@ MESSAGES = {
         "fa": "کاربر با موفقیت از تمام نشست‌ها خارج شد.",
         "en": "User successfully logged out from all sessions."
     },
+    "auth.force_logout.no_sessions_found": {
+        "fa": "کاربری با این شناسه یافت نشد یا هیچ جلسه فعالی ندارد.",
+        "en": "User not found or no active sessions exist."
+    },
     "auth.login.missing_credentials": {
         "fa": "شماره تلفن یا نام کاربری لازم است.",
         "en": "Phone or username is required."
@@ -86,6 +108,8 @@ MESSAGES = {
         "fa": "تعداد تلاش‌های ورود بیش از حد است. لطفاً بعداً تلاش کنید.",
         "en": "Too many login attempts. Please try again later."
     },
+
+    # Token-related messages
     "token.invalid": {
         "fa": "توکن نامعتبر است.",
         "en": "Invalid token."
@@ -94,10 +118,16 @@ MESSAGES = {
         "fa": "توکن منقضی شده است.",
         "en": "Token has expired."
     },
+    "token.too_many.attempts": {
+        "fa": "به دلیل تعداد بالای تلاش‌ها، موقتاً مسدود شده‌اید.",
+        "en": "You are temporarily blocked due to too many attempts."
+    },
     "token.refreshed": {
         "fa": "توکن‌ها با موفقیت به‌روزرسانی شدند.",
         "en": "Tokens refreshed successfully."
     },
+
+    # User and vendor-related messages
     "user.not_found": {
         "fa": "کاربر یافت نشد.",
         "en": "User not found."
@@ -126,18 +156,46 @@ MESSAGES = {
         "fa": "فروشنده در انتظار تأیید نیست.",
         "en": "Vendor is not pending approval."
     },
+    "vendor.too_many": {
+        "fa": "تعداد درخواست‌های تأیید/رد بیش از حد است.",
+        "en": "Too many approve/reject requests."
+    },
+    "vendor.invalid_action": {
+        "fa": "عملیات نامعتبر است.",
+        "en": "Invalid action."
+    },
+
+    # Session-related messages
     "session.invalid": {
         "fa": "نوع سشن نامعتبر است.",
         "en": "Invalid session type."
     },
-    "account.deletion.requested": {
-        "fa": "درخواست حذف حساب شما ثبت شد. تیم پشتیبانی به زودی بررسی خواهد کرد.",
-        "en": "Your account deletion request has been submitted. Support will review it soon."
+    "sessions.checked": {
+        "fa": {"title": "بررسی جلسات",
+               "body": "جلسات شما در {time} از IP {ip} با دستگاه {device} بررسی شد. تعداد: {count}"},
+        "en": {"title": "Sessions Checked",
+               "body": "Your sessions were checked at {time} from IP {ip} with device {device}. Count: {count}"}
     },
-    "server.error": {
-        "fa": "خطای سرور رخ داد.",
-        "en": "Server error occurred."
+    "sessions.danger": {
+        "fa": {"title": "هشدار امنیتی",
+               "body": "فعالیت مشکوک برای کاربر {user_id} از IP {ip} با {count} جلسه و {ip_count} آدرس IP"},
+        "en": {"title": "Security Alert",
+               "body": "Suspicious activity for user {user_id} from IP {ip} with {count} sessions and {ip_count} IPs"}
     },
+    "sessions.active_retrieved": {
+        "fa": "جلسات فعال با موفقیت بازیابی شدند.",
+        "en": "Active sessions retrieved successfully."
+    },
+    "sessions.all_retrieved": {
+        "fa": "همه جلسات با موفقیت بازیابی شدند.",
+        "en": "All sessions retrieved successfully."
+    },
+    "auth.logout.session_not_found": {
+        "fa": "جلسه مورد نظر یافت نشد.",
+        "en": "The requested session was not found."
+    },
+
+    # Notification-related messages
     "notification.otp_requested.title": {
         "fa": "درخواست کد تایید",
         "en": "OTP Requested"
@@ -178,77 +236,13 @@ MESSAGES = {
         "fa": "یک فروشنده جدید منتظر تایید است: {name}",
         "en": "A new vendor is awaiting approval: {name}"
     },
-    "otp.valid": {
-        "fa": "کد تایید با موفقیت تأیید شد.",
-        "en": "OTP has been successfully verified."
-    },
-    "notification.admin.vendor_submitted.body": {
-        "fa": "فروشنده {vendor_name} با شماره {vendor_phone} پروفایل خود را برای بررسی ارسال کرده است.",
-        "en": "Vendor {vendor_name} with phone number {vendor_phone} has submitted their profile for review."
-    },
     "notification.admin.vendor_submitted.title": {
         "fa": "ارسال پروفایل فروشنده",
         "en": "Vendor Profile Submitted"
     },
-    "auth.login.success.user": {
-        "fa": "کاربر عزیز، خوش آمدید!",
-        "en": "Welcome, dear user!"
-    },
-    "auth.login.success.vendor": {
-        "fa": "فروشنده گرامی، ورود شما موفق بود!",
-        "en": "Hello Vendor, you have successfully logged in!"
-    },
-    "auth.login.success.admin": {
-        "fa": "ادمین محترم، به پنل مدیریت خوش آمدید!",
-        "en": "Admin, welcome to the admin panel!"
-    },
-    "notification.sent": {
-        "fa": "نوتیفیکیشن با موفقیت ارسال شد",
-        "en": "Notification sent successfully"
-    },
-    "profile.too_many": {
-        "fa": "تعداد درخواست‌های تکمیل پروفایل بیش از حد است",
-        "en": "Too many profile completion requests"
-    },
-    "admin.user_joined": {
-        "fa": {"title": "کاربر جدید", "body": "کاربر {user_name} با شماره {user_phone} به سیستم پیوست"},
-        "en": {"title": "New User", "body": "User {user_name} with phone {user_phone} joined the system"}
-    },
-    "vendor.too_many": {
-        "fa": "تعداد درخواست‌های تأیید/رد بیش از حد است",
-        "en": "Too many approve/reject requests"
-    },
-    "vendor.invalid_action": {
-        "fa": "عملیات نامعتبر است",
-        "en": "Invalid action"
-    },
-    "sessions.checked": {
-        "fa": {"title": "بررسی جلسات",
-               "body": "جلسات شما در {time} از IP {ip} با دستگاه {device} بررسی شد. تعداد: {count}"},
-        "en": {"title": "Sessions Checked",
-               "body": "Your sessions were checked at {time} from IP {ip} with device {device}. Count: {count}"}
-    },
-    "sessions.danger": {
-        "fa": {"title": "هشدار امنیتی",
-               "body": "فعالیت مشکوک برای کاربر {user_id} از IP {ip} با {count} جلسه و {ip_count} آدرس IP"},
-        "en": {"title": "Security Alert",
-               "body": "Suspicious activity for user {user_id} from IP {ip} with {count} sessions and {ip_count} IPs"}
-    },
-    "auth.logout.session_not_found": {
-        "fa": "جلسه مورد نظر یافت نشد.",
-        "en": "The requested session was not found."
-    },
-    "auth.force_logout.no_sessions_found": {
-        "fa": "کاربری با این شناسه یافت نشد یا هیچ جلسه فعالی ندارد.",
-        "en": "User not found or no active sessions exist."
-    },
-    "sessions.active_retrieved": {
-        "fa": "جلسات فعال با موفقیت بازیابی شدند",
-        "en": "Active sessions retrieved successfully"
-    },
-    "sessions.all_retrieved": {
-        "fa": "همه جلسات با موفقیت بازیابی شدند",
-        "en": "All sessions retrieved successfully"
+    "notification.admin.vendor_submitted.body": {
+        "fa": "فروشنده {vendor_name} با شماره {vendor_phone} پروفایل خود را برای بررسی ارسال کرده است.",
+        "en": "Vendor {vendor_name} with phone number {vendor_phone} has submitted their profile for review."
     },
     "notification.vendor.active.title": {
         "fa": "پروفایل فروشنده فعال شد",
@@ -258,6 +252,62 @@ MESSAGES = {
         "fa": "پروفایل فروشنده شما با شماره {phone} اکنون فعال است. خوش آمدید!",
         "en": "Your vendor profile with phone {phone} is now active. Welcome!"
     },
+    "notification.sent": {
+        "fa": "نوتیفیکیشن با موفقیت ارسال شد",
+        "en": "Notification sent successfully"
+    },
+
+    # General error messages
+    "server.error": {
+        "fa": "خطای سرور رخ داد.",
+        "en": "Server error occurred."
+    },
+    "redis.error": {
+        "fa": "سرویس ذخیره‌سازی موقتاً در دسترس نیست.",
+        "en": "Storage service is temporarily unavailable."
+    },
+    "storage.error": {
+        "fa": "خطا در ذخیره‌سازی داده‌های کد تایید.",
+        "en": "Failed to store OTP data."
+    },
+    "invalid.result": {
+        "fa": "نتیجه عملیات نامعتبر است.",
+        "en": "Invalid operation result."
+    },
+    "invalid.status": {
+        "fa": "وضعیت کاربر نامعتبر است.",
+        "en": "Invalid user status."
+    },
+
+    # Device-related messages
+    "device.mismatch": {
+        "fa": "دستگاه مشکوک شناسایی شد.",
+        "en": "Suspicious device detected."
+    },
+    "invalid.device_fingerprint": {
+        "fa": "فرمت اثر انگشت دستگاه نامعتبر است.",
+        "en": "Invalid device fingerprint format."
+    },
+
+    # Profile-related messages
+    "profile.too_many": {
+        "fa": "تعداد درخواست‌های تکمیل پروفایل بیش از حد است.",
+        "en": "Too many profile completion requests."
+    },
+
+    # Admin-related messages
+    "admin.user_joined": {
+        "fa": {"title": "کاربر جدید", "body": "کاربر {user_name} با شماره {user_phone} به سیستم پیوست"},
+        "en": {"title": "New User", "body": "User {user_name} with phone {user_phone} joined the system"}
+    },
+
+    # Account deletion messages
+    "account.deletion.requested": {
+        "fa": "درخواست حذف حساب شما ثبت شد. تیم پشتیبانی به زودی بررسی خواهد کرد.",
+        "en": "Your account deletion request has been submitted. Support will review it soon."
+    },
+
+    # CSRF-related messages
     "csrf.missing": {
         "fa": "توکن CSRF ارسال نشده است.",
         "en": "CSRF token is missing."
@@ -278,4 +328,6 @@ def get_message(key: str, lang: Literal["fa", "en"] = "fa",
             return message.format(**variables)
         except (KeyError, ValueError):
             return message
+    if isinstance(message, dict):
+        return message  # For messages with title/body structure
     return message
