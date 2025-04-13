@@ -94,7 +94,7 @@ async def call_otp_verification(data: VerifyOTPModel, request: Request, client_i
             }
         },
         400: {
-            "description": "Invalid OTP or token",
+            "description": "Invalid OTP, token, or device mismatch",
             "content": {
                 "application/json": {
                     "example": {
@@ -103,6 +103,20 @@ async def call_otp_verification(data: VerifyOTPModel, request: Request, client_i
                         "error_code": "OTP_INVALID",
                         "status": "error",
                         "metadata": {"remaining_attempts": 4}
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Device mismatch or permission error",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Suspicious device detected.",
+                        "message": "Device mismatch detected.",
+                        "error_code": "DEVICE_MISMATCH",
+                        "status": "error",
+                        "metadata": {}
                     }
                 }
             }
@@ -129,15 +143,32 @@ async def verify_otp_endpoint(
     client_ip: Annotated[str, Depends(extract_client_ip)],
     context: dict = Depends(check_database_connection),
 ) -> Union[StandardResponse, ErrorResponse]:
-    """Verify an OTP and proceed with authentication."""
-    log_info("Received request body", extra={"body": data.model_dump()})
+    """Verify an OTP and proceed with authentication.
+
+    Args:
+        data: Input data including OTP, token, and optional device fingerprint.
+        request: FastAPI request object.
+        client_ip: Client IP address.
+        context: Database and Redis connections.
+
+    Returns:
+        StandardResponse with auth details or ErrorResponse if failed.
+    """
+    log_info("Received request body", extra={
+        "body": data.model_dump(),
+        "device_fingerprint": data.device_fingerprint
+    })
 
     try:
         payload = await decode_token(data.temporary_token, token_type="temp", redis=context["redis"])
         data.role = payload.get("role")
         data.status = payload.get("status")
     except Exception as e:
-        log_error("Failed to verify token", extra={"error": str(e), "temporary_token": data.temporary_token[:10] + "..."})
+        log_error("Failed to verify token", extra={
+            "error": str(e),
+            "temporary_token": data.temporary_token[:10] + "...",
+            "device_fingerprint": data.device_fingerprint
+        })
         return ErrorResponse(
             detail=str(e),
             message=get_message("token.invalid", data.response_language),
@@ -179,7 +210,12 @@ async def verify_otp_endpoint(
             metadata=e.metadata
         )
     except BadRequestException as e:
-        log_error("Invalid OTP", extra={"error": e.detail, "client_ip": client_ip})
+        log_error("Invalid OTP", extra={
+            "error": e.detail,
+            "client_ip": client_ip,
+            "error_code": e.error_code,
+            "device_fingerprint": data.device_fingerprint
+        })
         return ErrorResponse(
             detail=e.detail,
             message=e.message,
@@ -191,7 +227,8 @@ async def verify_otp_endpoint(
             "error": str(e),
             "otp": "****",
             "temporary_token": data.temporary_token[:10] + "...",
-            "client_ip": client_ip
+            "client_ip": client_ip,
+            "device_fingerprint": data.device_fingerprint
         })
         return ErrorResponse(
             detail=str(e),

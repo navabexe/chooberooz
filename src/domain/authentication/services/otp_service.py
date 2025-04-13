@@ -1,3 +1,4 @@
+# path: src/domain/authentication/services/otp_service.py
 import hashlib
 from datetime import datetime, timedelta
 from uuid import uuid4
@@ -17,6 +18,7 @@ from src.shared.utilities.logging import create_log_data, log_info, log_error
 from src.shared.utilities.network import extract_client_ip, parse_user_agent, get_location_from_ip
 from src.shared.utilities.text import generate_otp_code
 from src.shared.utilities.time import utc_now
+from src.shared.utilities.device_fingerprint import manage_device_fingerprint
 from src.domain.notification.services.notification_service import NotificationService
 from src.domain.authentication.services.session_service import SessionService, create_user_session
 from src.domain.authentication.services.rate_limiter import check_rate_limits, store_rate_limit_keys
@@ -31,13 +33,13 @@ class UserStatus(str, Enum):
 
 
 def hash_otp(otp: str) -> str:
-    """Hash the OTP with a salt for secure storage."""
+    """Hash OTP with salt for secure storage."""
     salted = f"{settings.OTP_SALT}:{otp}"
     return hashlib.sha256(salted.encode()).hexdigest()
 
 
 def extract_jti(token: str) -> str:
-    """Extract the JWT ID (jti) from a token."""
+    """Extract JWT ID (jti) from token."""
     return token.split('.')[1]
 
 
@@ -59,7 +61,7 @@ class OTPNotifier:
         self.notification_service = notification_service
 
     async def send_otp(self, phone: str, role: str, otp_code: str, purpose: str, language: str, db: AsyncIOMotorDatabase) -> bool:
-        """Send OTP notification to the user."""
+        """Send OTP notification to user."""
         try:
             result = await self.notification_service.send(
                 receiver_id=phone,
@@ -111,7 +113,6 @@ class OTPStorageHandler:
                 "jti": jti,
                 "expiry": settings.OTP_EXPIRY
             })
-            # Verify storage
             stored_otp = await self.otp_repo.get(keys["otp_key"])
             stored_phone = await self.otp_repo.get(keys["temp_token_key"])
             if not stored_otp or not stored_phone:
@@ -332,7 +333,7 @@ class OTPService(BaseService):
         device_fingerprint: Optional[str] = None,
         user_agent: str = "Unknown"
     ) -> dict:
-        """Request an OTP and send it to the user."""
+        """Request an OTP and send it to user."""
         context = {
             "entity_type": "otp",
             "entity_id": phone,
@@ -344,21 +345,8 @@ class OTPService(BaseService):
         async def operation():
             await check_rate_limits(phone, role, self.otp_repo, language)
 
-            # مدیریت device_fingerprint
-            device_key = f"device:{role}:{phone}"
-            if device_fingerprint:
-                stored_device = await self.otp_repo.get(device_key)
-                if stored_device and stored_device != device_fingerprint:
-                    log_error("Device fingerprint mismatch", extra={"phone": phone, "stored_device": stored_device})
-                    raise BadRequestException(
-                        detail="Suspicious device detected.",
-                        message=get_message("device.mismatch", language),
-                        error_code="DEVICE_MISMATCH",
-                        language=language
-                    )
-                await self.otp_repo.setex(device_key, settings.OTP_EXPIRY, device_fingerprint)
-            else:
-                log_info("No device fingerprint provided", extra={"phone": phone})
+            # Handle device fingerprint
+            await manage_device_fingerprint(redis, role, phone, device_fingerprint, language)
 
             otp_code, temp_token, jti = await self.generate_otp_and_token(phone, role, language)
             await self.storage.store(phone, role, hash_otp(otp_code), jti, language)
@@ -386,7 +374,7 @@ class OTPService(BaseService):
         language: str,
         now: datetime
     ) -> dict:
-        """Handle the result of OTP verification based on user status."""
+        """Handle OTP verification result based on user status."""
         if status in [UserStatus.INCOMPLETE, UserStatus.PENDING]:
             new_jti = str(uuid4())
             temp_token = await generate_temp_token(
@@ -433,7 +421,7 @@ class OTPService(BaseService):
         language: str,
         db: AsyncIOMotorDatabase
     ) -> tuple[dict, str]:
-        """Insert or update user after verifying OTP."""
+        """Insert or update user after OTP verification."""
         collection = f"{role}s"
         user = await self.user_repo.find_user(collection, phone)
         now = utc_now()
@@ -476,7 +464,7 @@ class OTPService(BaseService):
         language: str,
         db: AsyncIOMotorDatabase
     ):
-        """Track failed OTP attempts, block if limit exceeded, and notify admin."""
+        """Track failed OTP attempts and block if limit exceeded."""
         jti = extract_jti(temporary_token)
         keys = get_otp_keys(role, phone, jti)
         try:
@@ -534,7 +522,7 @@ class OTPService(BaseService):
         device_fingerprint: Optional[str] = None,
         user_agent: str = "Unknown"
     ) -> dict:
-        """Verify the OTP and create or update user session."""
+        """Verify OTP and create/update user session."""
         context = {
             "entity_type": "otp",
             "entity_id": "unknown",
@@ -628,7 +616,7 @@ class OTPService(BaseService):
             )
             if not is_valid:
                 await self.handle_failed_verification(otp, temporary_token, phone, role, language, db)
-                return {}  # خطا توسط handle_failed_verification پرتاب شده است
+                return {}
 
             await self.storage.clear(phone, role, jti, language)
             user, user_id = await self.update_user_after_verification(phone, role, language, db)

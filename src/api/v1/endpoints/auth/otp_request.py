@@ -114,7 +114,7 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
             }
         },
         403: {
-            "description": "Device mismatch detected",
+            "description": "Device mismatch or permission error",
             "content": {
                 "application/json": {
                     "example": {
@@ -135,8 +135,21 @@ async def request_otp_endpoint(
     client_ip: Annotated[str, Depends(extract_client_ip)],
     context: dict = Depends(check_database_connection),
 ) -> Union[StandardResponse, ErrorResponse]:
-    """Request an OTP for authentication."""
-    log_info("Received request body", extra={"body": data.model_dump()})
+    """Request an OTP for authentication.
+
+    Args:
+        data: Input data including phone, role, purpose, and optional device fingerprint.
+        request: FastAPI request object.
+        client_ip: Client IP address.
+        context: Database and Redis connections.
+
+    Returns:
+        StandardResponse with OTP details or ErrorResponse if failed.
+    """
+    log_info("Received request body", extra={
+        "body": data.model_dump(),
+        "device_fingerprint": data.device_fingerprint
+    })
     try:
         await check_otp_permission(data.role)
         result = await call_otp_service(data, request, client_ip, context)
@@ -159,7 +172,12 @@ async def request_otp_endpoint(
             metadata=e.metadata
         )
     except BadRequestException as e:
-        log_error("Invalid OTP request", extra={"error": e.detail, "phone": data.phone})
+        log_error("Invalid OTP request", extra={
+            "error": e.detail,
+            "phone": data.phone,
+            "error_code": e.error_code,
+            "device_fingerprint": data.device_fingerprint
+        })
         return ErrorResponse(
             detail=e.detail,
             message=e.message,
@@ -175,7 +193,8 @@ async def request_otp_endpoint(
             "trace": traceback.format_exc(),
             "phone": data.phone,
             "role": data.role,
-            "purpose": data.purpose
+            "purpose": data.purpose,
+            "device_fingerprint": data.device_fingerprint
         })
         return ErrorResponse(
             detail=str(e),
