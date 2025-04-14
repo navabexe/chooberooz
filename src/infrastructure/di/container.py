@@ -10,6 +10,7 @@ from src.infrastructure.storage.nosql.repositories.user_repository import UserRe
 from src.domain.notification.services.notification_service import NotificationService
 from src.domain.authentication.services.session_service import SessionService
 from src.domain.authentication.services.otp_service import OTPService
+from src.domain.authentication.services.complete_profile_service import CompleteProfileService
 
 
 class Container(containers.DeclarativeContainer):
@@ -50,6 +51,14 @@ class Container(containers.DeclarativeContainer):
         OTPService,
         otp_repo=otp_repo,
         user_repo=user_repo,
+        notification_service=notification_service,
+        session_service=session_service
+    )
+
+    complete_profile_service = providers.Factory(
+        CompleteProfileService,
+        user_repo=user_repo,
+        otp_repo=otp_repo,
         notification_service=notification_service,
         session_service=session_service
     )

@@ -20,16 +20,12 @@ def setup_routers(app: FastAPI):
         - Logs each successful registration and any errors encountered.
         - If no routers are found, logs a warning but continues execution.
     """
-    # پایه روتر بدون پیشوند اضافی
     base_router = APIRouter(tags=[settings.AUTH_TAG])
 
-    # محاسبه مسیر دایرکتوری endpoints
     routers_dir = Path(__file__).resolve().parent.parent.parent / "api" / "v1" / "endpoints"
 
-    # شمارشگر برای روترهای ثبت‌شده
     registered_count = 0
 
-    # بررسی وجود دایرکتوری
     if not routers_dir.exists():
         log_error(
             "Routers directory not found, skipping router registration",
@@ -40,24 +36,19 @@ def setup_routers(app: FastAPI):
 
     log_info("Scanning routers directory", extra={"path": str(routers_dir)})
 
-    # اسکن فایل‌های Python به صورت بازگشتی
     for file_path in routers_dir.rglob("*.py"):
-        # نادیده گرفتن فایل‌هایی که با _ شروع می‌شن
         if file_path.name.startswith("_"):
             log_info("Skipping non-router file", extra={"file": str(file_path)})
             continue
 
-        # تبدیل مسیر فایل به مسیر ماژول
         relative_path = file_path.relative_to(routers_dir.parent.parent.parent).with_suffix("")
         module_path = f"src.{relative_path.as_posix().replace('/', '.')}"
 
         log_info("Attempting to import module", extra={"module_path": module_path})
 
         try:
-            # وارد کردن ماژول
             module = import_module(module_path)
 
-            # بررسی وجود شیء router در ماژول
             if hasattr(module, "router"):
                 base_router.include_router(module.router)
                 registered_count += 1
@@ -86,7 +77,6 @@ def setup_routers(app: FastAPI):
             )
             continue
 
-    # ثبت پایه روتر با اپلیکیشن
     app.include_router(base_router)
 
     if registered_count == 0:

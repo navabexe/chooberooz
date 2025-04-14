@@ -5,39 +5,39 @@ from src.shared.utilities.logging import log_warning
 MESSAGES = {
     # OTP-related messages
     "otp.invalid": {
-        "fa": "کد تایید اشتباه است.",
+        "fa": "کد تأیید اشتباه است.",
         "en": "The OTP code is incorrect."
     },
     "otp.invalid.with_attempts": {
-        "fa": "کد واردشده اشتباه است. {remaining} تلاش باقی مانده است.",
+        "fa": "کد وارد شده اشتباه است. {remaining} تلاش باقی‌مانده است.",
         "en": "The entered code is incorrect. {remaining} attempts left."
     },
     "otp.expired": {
-        "fa": "کد تایید منقضی شده است.",
+        "fa": "کد تأیید منقضی شده است.",
         "en": "The OTP code has expired."
     },
     "otp.sent": {
-        "fa": "کد تایید برای شما ارسال شد.",
+        "fa": "کد تأیید برای شما ارسال شد.",
         "en": "OTP has been sent to your phone."
     },
     "otp.too_many.1min": {
-        "fa": "تعداد درخواست در یک دقیقه زیاد است.",
+        "fa": "تعداد درخواست‌ها در یک دقیقه بیش از حد است.",
         "en": "Too many OTP requests in 1 minute."
     },
     "otp.too_many.10min": {
-        "fa": "تعداد درخواست در ۱۰ دقیقه زیاد است。",
+        "fa": "تعداد درخواست‌ها در ۱۰ دقیقه بیش از حد است.",
         "en": "Too many OTP requests in 10 minutes."
     },
     "otp.too_many.attempts": {
-        "fa": "به دلیل تعداد بالای درخواست، موقتاً مسدود شده‌اید.",
+        "fa": "به دلیل تعداد بالای تلاش‌ها، موقتاً مسدود شده‌اید.",
         "en": "You are temporarily blocked due to too many attempts."
     },
     "otp.valid": {
-        "fa": "کد تایید با موفقیت تأیید شد.",
+        "fa": "کد تأیید با موفقیت تأیید شد.",
         "en": "OTP has been successfully verified."
     },
     "invalid.otp_code": {
-        "fa": "کد تایید باید فقط شامل اعداد باشد.",
+        "fa": "کد تأیید باید فقط شامل اعداد باشد.",
         "en": "OTP code must contain only digits."
     },
 
@@ -67,7 +67,7 @@ MESSAGES = {
         "en": "Profile completed successfully."
     },
     "auth.profile.pending": {
-        "fa": "پروفایل در انتظار تایید ادمین است.",
+        "fa": "پروفایل در انتظار تأیید ادمین است.",
         "en": "Profile is pending admin approval."
     },
     "auth.logout.single": {
@@ -173,20 +173,28 @@ MESSAGES = {
 
     # Session-related messages
     "session.invalid": {
-        "fa": "نوع سشن نامعتبر است.",
+        "fa": "نوع جلسه نامعتبر است.",
         "en": "Invalid session type."
     },
     "sessions.checked": {
-        "fa": {"title": "بررسی جلسات",
-               "body": "جلسات شما در {time} از IP {ip} با دستگاه {device} بررسی شد. تعداد: {count}"},
-        "en": {"title": "Sessions Checked",
-               "body": "Your sessions were checked at {time} from IP {ip} with device {device}. Count: {count}"}
+        "fa": {
+            "title": "بررسی جلسات",
+            "body": "جلسات شما در {time} از IP {ip} با دستگاه {device} بررسی شد. تعداد: {count}"
+        },
+        "en": {
+            "title": "Sessions Checked",
+            "body": "Your sessions were checked at {time} from IP {ip} with device {device}. Count: {count}"
+        }
     },
     "sessions.danger": {
-        "fa": {"title": "هشدار امنیتی",
-               "body": "فعالیت مشکوک برای کاربر {user_id} از IP {ip} با {count} جلسه و {ip_count} آدرس IP"},
-        "en": {"title": "Security Alert",
-               "body": "Suspicious activity for user {user_id} from IP {ip} with {count} sessions and {ip_count} IPs"}
+        "fa": {
+            "title": "هشدار امنیتی",
+            "body": "فعالیت مشکوک برای کاربر {user_id} از IP {ip} با {count} جلسه و {ip_count} آدرس IP"
+        },
+        "en": {
+            "title": "Security Alert",
+            "body": "Suspicious activity for user {user_id} from IP {ip} with {count} sessions and {ip_count} IPs"
+        }
     },
     "sessions.active_retrieved": {
         "fa": "جلسات فعال با موفقیت بازیابی شدند.",
@@ -203,52 +211,44 @@ MESSAGES = {
 
     # Notification-related messages
     "notification.otp_requested.title": {
-        "fa": "درخواست کد تایید",
+        "fa": "درخواست کد تأیید",
         "en": "OTP Requested"
     },
     "notification.otp_requested.body": {
-        "fa": "کد تایید برای شماره {phone} با هدف {purpose} ارسال شد. کد: {otp}",
+        "fa": "کد تأیید برای شماره {phone} با هدف {purpose} ارسال شد. کد: {otp}",
         "en": "OTP has been sent to {phone} for {purpose} purpose. Code: {otp}"
     },
     "notification.otp_verified.title": {
-        "fa": "کد تایید تأیید شد",
+        "fa": "کد تأیید تأیید شد",
         "en": "OTP Verified"
     },
     "notification.otp_verified.body": {
-        "fa": "کد تایید برای شماره {phone} با موفقیت تأیید شد.",
+        "fa": "کد تأیید برای شماره {phone} با موفقیت تأیید شد.",
         "en": "OTP for {phone} has been successfully verified."
     },
     "notification.user.profile_completed.title": {
-        "fa": "پروفایل شما با موفقیت تکمیل شد",
-        "en": "Your profile has been successfully completed"
+        "fa": "تکمیل پروفایل کاربر",
+        "en": "User Profile Completed"
     },
     "notification.user.profile_completed.body": {
-        "fa": "از اینکه اطلاعات خود را تکمیل کردید سپاسگزاریم.",
-        "en": "Thank you for completing your profile."
+        "fa": "سلام {name}، پروفایل شما با موفقیت تکمیل شد.",
+        "en": "Hello {name}, your profile has been successfully completed."
     },
     "notification.vendor.profile_pending.title": {
-        "fa": "پروفایل در انتظار تایید",
+        "fa": "پروفایل در انتظار تأیید",
         "en": "Vendor Profile Pending"
     },
     "notification.vendor.profile_pending.body": {
-        "fa": "پروفایل فروشنده شما برای بررسی ارسال شد. منتظر تایید مدیر باشید.",
-        "en": "Your vendor profile has been submitted for review. Please wait for admin approval."
-    },
-    "notification.admin.vendor_pending.title": {
-        "fa": "درخواست فروشنده جدید",
-        "en": "New Vendor Request"
-    },
-    "notification.admin.vendor_pending.body": {
-        "fa": "یک فروشنده جدید منتظر تایید است: {name}",
-        "en": "A new vendor is awaiting approval: {name}"
+        "fa": "پروفایل فروشنده شما با نام {name} ثبت شد و در انتظار تأیید است.",
+        "en": "Your vendor profile with name {name} has been submitted and is pending approval."
     },
     "notification.admin.vendor_submitted.title": {
-        "fa": "ارسال پروفایل فروشنده",
-        "en": "Vendor Profile Submitted"
+        "fa": "ارسال پروفایل فروشنده جدید",
+        "en": "New Vendor Profile Submitted"
     },
     "notification.admin.vendor_submitted.body": {
-        "fa": "فروشنده {vendor_name} با شماره {vendor_phone} پروفایل خود را برای بررسی ارسال کرده است.",
-        "en": "Vendor {vendor_name} with phone number {vendor_phone} has submitted their profile for review."
+        "fa": "فروشنده جدید با نام {vendor_name} و شماره {vendor_phone} پروفایل خود را ثبت کرد.",
+        "en": "A new vendor with name {vendor_name} and phone {vendor_phone} has submitted their profile."
     },
     "notification.vendor.active.title": {
         "fa": "پروفایل فروشنده فعال شد",
@@ -258,9 +258,57 @@ MESSAGES = {
         "fa": "پروفایل فروشنده شما با شماره {phone} اکنون فعال است. خوش آمدید!",
         "en": "Your vendor profile with phone {phone} is now active. Welcome!"
     },
+    "notification.admin.vendor_pending.title": {
+        "fa": "درخواست فروشنده جدید",
+        "en": "New Vendor Request"
+    },
+    "notification.admin.vendor_pending.body": {
+        "fa": "یک فروشنده جدید با نام {name} در انتظار تأیید است.",
+        "en": "A new vendor with name {name} is awaiting approval."
+    },
+    "notification.admin.user_joined.title": {
+        "fa": "کاربر جدید",
+        "en": "New User"
+    },
+    "notification.admin.user_joined.body": {
+        "fa": "کاربر جدید با نام {user_name} و شماره {user_phone} به سیستم پیوست.",
+        "en": "A new user with name {user_name} and phone {user_phone} has joined the system."
+    },
+    "notification.account_deleted.title": {
+        "fa": "حذف حساب",
+        "en": "Account Deleted"
+    },
+    "notification.account_deleted.body": {
+        "fa": "حساب کاربری شما با موفقیت حذف شد.",
+        "en": "Your account has been successfully deleted."
+    },
+    "notification.admin_alert_login_failure.title": {
+        "fa": "هشدار ورود ناموفق",
+        "en": "Failed Login Alert"
+    },
+    "notification.admin_alert_login_failure.body": {
+        "fa": "تلاش ناموفق برای ورود کاربر {user_id} از IP {ip}.",
+        "en": "Failed login attempt for user {user_id} from IP {ip}."
+    },
+    "notification.notification_failed.title": {
+        "fa": "خطای ارسال اعلان",
+        "en": "Notification Failure"
+    },
+    "notification.notification_failed.body": {
+        "fa": "ارسال اعلان برای {receiver_id} با خطای {error} (نوع: {type}) ناموفق بود.",
+        "en": "Failed to send notification to {receiver_id} with error {error} (type: {type})."
+    },
+    "notification.critical_notification_failed.title": {
+        "fa": "خطای بحرانی اعلان",
+        "en": "Critical Notification Failure"
+    },
+    "notification.critical_notification_failed.body": {
+        "fa": "خطای بحرانی در ارسال اعلان برای {receiver_id} با خطای {error} در قالب {template_key}.",
+        "en": "Critical failure in sending notification to {receiver_id} with error {error} for template {template_key}."
+    },
     "notification.sent": {
-        "fa": "نوتیفیکیشن با موفقیت ارسال شد",
-        "en": "Notification sent successfully"
+        "fa": "اعلان با موفقیت ارسال شد.",
+        "en": "Notification sent successfully."
     },
 
     # General error messages
@@ -273,7 +321,7 @@ MESSAGES = {
         "en": "Storage service is temporarily unavailable."
     },
     "storage.error": {
-        "fa": "خطا در ذخیره‌سازی داده‌های کد تایید.",
+        "fa": "خطا در ذخیره‌سازی داده‌های کد تأیید.",
         "en": "Failed to store OTP data."
     },
     "invalid.result": {
@@ -316,11 +364,17 @@ MESSAGES = {
         "fa": "تعداد درخواست‌های تکمیل پروفایل بیش از حد است.",
         "en": "Too many profile completion requests."
     },
-
-    # Admin-related messages
-    "admin.user_joined": {
-        "fa": {"title": "کاربر جدید", "body": "کاربر {user_name} با شماره {user_phone} به سیستم پیوست"},
-        "en": {"title": "New User", "body": "User {user_name} with phone {user_phone} joined the system"}
+    "invalid.business_category": {
+        "fa": "دسته‌بندی کسب‌وکار نامعتبر است: {invalid}",
+        "en": "Invalid business category: {invalid}"
+    },
+    "invalid.visibility": {
+        "fa": "نوع نمایش نامعتبر است. مقادیر مجاز: {valid}",
+        "en": "Invalid visibility type. Allowed values: {valid}"
+    },
+    "invalid.vendor_type": {
+        "fa": "نوع فروشنده نامعتبر است. مقادیر مجاز: {valid}",
+        "en": "Invalid vendor type. Allowed values: {valid}"
     },
 
     # Account deletion messages
@@ -329,43 +383,32 @@ MESSAGES = {
         "en": "Your account deletion request has been submitted. Support will review it soon."
     },
 
-    # CSRF-related messages
-    "csrf.missing": {
-        "fa": "توکن CSRF ارسال نشده است.",
-        "en": "CSRF token is missing."
-    },
-    "csrf.invalid": {
-        "fa": "توکن CSRF معتبر نیست یا منقضی شده است.",
-        "en": "CSRF token is invalid or expired."
-    },
-    "otp.too_many.blocked": {
-        "fa": "به دلیل تعداد بالای درخواست، موقتاً مسدود شده‌اید.",
-        "en": "You are temporarily blocked due to too many requests."
-    },
+
+    # MongoDB-related messages
     "mongo.insert.failed": {
-        "en": "Failed to insert data into database.",
-        "fa": "خطا در درج اطلاعات در پایگاه داده."
+        "fa": "خطا در درج اطلاعات در پایگاه داده.",
+        "en": "Failed to insert data into database."
     },
     "mongo.find_one.failed": {
-        "en": "Failed to retrieve data from database.",
-        "fa": "خطا در بازیابی اطلاعات از پایگاه داده."
+        "fa": "خطا در بازیابی اطلاعات از پایگاه داده.",
+        "en": "Failed to retrieve data from database."
     },
     "mongo.update.failed": {
-        "en": "Failed to update database record.",
-        "fa": "خطا در به‌روزرسانی رکورد پایگاه داده."
+        "fa": "خطا در به‌روزرسانی رکورد پایگاه داده.",
+        "en": "Failed to update database record."
     },
     "mongo.find.failed": {
-        "en": "Failed to search database records.",
-        "fa": "خطا در جستجوی رکوردهای پایگاه داده."
+        "fa": "خطا در جستجوی رکوردهای پایگاه داده.",
+        "en": "Failed to search database records."
     },
     "mongo.paginate.failed": {
-        "en": "Failed to paginate data.",
-        "fa": "خطا در صفحه‌بندی اطلاعات."
+        "fa": "خطا در صفحه‌بندی اطلاعات.",
+        "en": "Failed to paginate data."
     },
     "mongo.delete.failed": {
-        "en": "Failed to delete record from database.",
-        "fa": "خطا در حذف رکورد از پایگاه داده."
-    },
+        "fa": "خطا در حذف رکورد از پایگاه داده.",
+        "en": "Failed to delete record from database."
+    }
 }
 
 
