@@ -1,4 +1,3 @@
-# Path: src/shared/errors/domain/security.py
 from ..base import BaseError
 from ...utilities.constants import DomainErrorCode, HttpStatus
 from ...utilities.helpers import generate_trace_id
@@ -11,13 +10,15 @@ class UnauthorizedAccessError(BaseError):
     def __init__(
             self,
             resource: str,
+            message: str = None,
+            error_code: str = DomainErrorCode.UNAUTHORIZED_ACCESS.value,
             trace_id: TraceId = None,
             details: ErrorDetails = None,
             language: LanguageCode = "en"
     ):
         super().__init__(
-            error_code=DomainErrorCode.UNAUTHORIZED_ACCESS.value,
-            message=f"Unauthorized access to {resource}.",
+            error_code=error_code,
+            message=message or f"Unauthorized access to {resource}.",
             status_code=HttpStatus.UNAUTHORIZED.value,
             trace_id=trace_id or generate_trace_id(),
             details=details or {"resource": resource},

@@ -1,15 +1,16 @@
-# Path: src/domain/authentication/session.py
 from datetime import datetime, timezone
 from typing import Dict, List, Literal
 from uuid import uuid4
 from redis.asyncio import Redis
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from src.domain.authentication.models.token import VendorJWTProfile
 from src.shared.config.settings import settings
 from src.shared.security.token import generate_access_token, generate_refresh_token
 from src.shared.utilities.constants import HttpStatus
 from src.shared.utilities.network import get_location_from_ip
 from src.shared.utilities.text import safe_json_dumps, decode_value
 from src.domain.authentication.models.session import fetch_sessions_from_redis
-from src.domain.authentication.models.token import VendorJWTProfile
 from src.domain.notification.services.notification_service import notification_service
 from src.infrastructure.storage.cache.repositories.otp_repository import OTPRepository
 from src.shared.logging.service import LoggingService
@@ -21,16 +22,16 @@ logger = LoggingService(LogConfig())
 
 
 def stringify_session_data(data: dict) -> dict:
-    """Convert all values in session_data to byte-safe strings."""
+    """Convert all values in session_data to JSON-serializable strings and ensure keys are strings."""
     result = {}
     for k, v in data.items():
         if v is None:
             continue
-        key_encoded = k.encode()
+        key_str = str(k)  # Convert key to string
         if isinstance(v, (dict, list, tuple)):
-            result[key_encoded] = safe_json_dumps(v).encode()
+            result[key_str] = safe_json_dumps(v)
         else:
-            result[key_encoded] = str(v).encode()
+            result[key_str] = str(v)  # Convert value to string without encoding
     return result
 
 
@@ -118,12 +119,14 @@ class SessionService:
 
     async def delete_incomplete_sessions(self, user_id: str):
         """Delete incomplete sessions for a user from Redis."""
+        redis = await self.repo._get_redis()
         session_keys = await self.repo.scan_keys(f"sessions:{user_id}:*")
         for key in session_keys:
             session_data = await self.repo.hgetall(key)
-            status = session_data.get(b"status") or session_data.get("status", b"")
-            if decode_value(status) != "active":
-                await self.repo.delete(key)
+            session_data = {k: v.decode() if isinstance(v, bytes) else v for k, v in session_data.items()}
+            status = session_data.get("status", "")
+            if status != "active":
+                await redis.delete(key)
                 logger.info("Deleted incomplete session", context={"user_id": user_id, "session_key": key})
 
     async def get_sessions(
@@ -133,9 +136,10 @@ class SessionService:
             language: LanguageCode = "fa",
             requester_role: str = "vendor",
             client_ip: str = "unknown",
+            db: AsyncIOMotorDatabase = None
     ) -> dict:
         """Retrieve user sessions from Redis with optional status filtering."""
-        redis = await self.repo.redis
+        redis = await self.repo._get_redis()
         sessions = await fetch_sessions_from_redis(redis=redis, user_id=user_id, status_filter=status_filter)
 
         notification_sent = False
@@ -145,7 +149,8 @@ class SessionService:
                     user_id=user_id,
                     sessions=sessions,
                     ip=client_ip,
-                    language=language
+                    language=language,
+                    db=db
                 )
             except Exception as e:
                 logger.error("Session notification failed", context={
@@ -174,6 +179,6 @@ class SessionService:
         }
 
 
-def get_session_service(redis: Redis = None) -> SessionService:
+def get_session_service(redis: Redis) -> SessionService:
     """Factory function to create a SessionService instance."""
     return SessionService(redis)

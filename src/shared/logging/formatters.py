@@ -1,4 +1,3 @@
-# Path: src/shared/logging/formatters.py
 import json
 import logging
 from datetime import datetime
@@ -33,20 +32,18 @@ class JsonFormatter(logging.Formatter):
             "timestamp": utc_now().isoformat() + "Z",
             "level": record.levelname,
             "message": record.getMessage(),
-            "trace_id": str(record.trace_id) if record.trace_id else None,
-            "span_id": str(record.span_id) if record.span_id else None,
-            "context": self._serialize_context(getattr(record, "context", {})),
+            "trace_id": str(record.extra_trace_id) if hasattr(record, "extra_trace_id") and record.extra_trace_id else None,
+            "span_id": str(record.extra_span_id) if hasattr(record, "extra_span_id") and record.extra_span_id else None,
+            "context": self._serialize_context(getattr(record, "extra_context", {})),
             "module": record.module,
             "funcName": record.funcName,
             "lineno": record.lineno
         }
         return json.dumps(log_data, ensure_ascii=False)
 
-
 class ConsoleFormatter(logging.Formatter):
     """Formatter for human-readable console logs with color."""
 
-    # Define colors for each log level
     LEVEL_COLORS = {
         "DEBUG": Fore.CYAN,
         "INFO": Fore.WHITE,
@@ -60,11 +57,10 @@ class ConsoleFormatter(logging.Formatter):
         timestamp = utc_now().isoformat() + "Z"
         level = record.levelname
         message = record.getMessage()
-        trace_id = str(record.trace_id) if record.trace_id else "-"
-        context = getattr(record, "context", {})
+        trace_id = str(record.extra_trace_id) if hasattr(record, "extra_trace_id") and record.extra_trace_id else "-"
+        context = getattr(record, "extra_context", {})
         context_str = f" | context={context}" if context else ""
 
-        # Apply color based on log level
         color = self.LEVEL_COLORS.get(level, Fore.WHITE)
         formatted_message = f"{color}[{timestamp}] {level} | {message} | trace_id={trace_id}{context_str}{Style.RESET_ALL}"
         return formatted_message

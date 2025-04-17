@@ -1,10 +1,8 @@
-# Path: src/shared/logging/service.py
 import logging
 from typing import Optional, Dict, Any
 from .config import LogConfig
 from .handlers import LogHandlerFactory
 from .tracers import Tracer
-from .record import CustomLogRecord
 from ..utilities.types import TraceId
 from ..utilities.constants import LogLevel
 
@@ -14,9 +12,6 @@ class LoggingService:
 
     def __init__(self, config: LogConfig, tracer: Tracer = None):
         """Initialize logging service with configuration and tracer."""
-        # Set custom LogRecord factory
-        logging.setLogRecordFactory(CustomLogRecord)
-
         self.logger = logging.getLogger("marketplace")
         self.logger.setLevel(getattr(logging, config.level))
         self.tracer = tracer or Tracer()
@@ -28,15 +23,11 @@ class LoggingService:
         for handler in LogHandlerFactory.get_handlers(config):
             self.logger.addHandler(handler)
 
+        # Debug log to check tracer initialization
+        self.logger.debug(f"Tracer initialized with trace_id: {self.tracer.get_trace_id()}")
+
     def set_log_level(self, level: str) -> None:
-        """Change the logging level dynamically.
-
-        Args:
-            level: The new log level (e.g., 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL').
-
-        Raises:
-            ValueError: If the provided level is invalid.
-        """
+        """Change the logging level dynamically."""
         if level not in LogLevel.__members__:
             raise ValueError(f"Invalid log level: {level}. Valid levels: {list(LogLevel.__members__)}")
         log_level = getattr(logging, level)
@@ -54,9 +45,9 @@ class LoggingService:
     ) -> None:
         """Log message with specified level and context."""
         extra = {
-            "context": context or {},
-            "trace_id": trace_id or self.tracer.get_trace_id(),
-            "span_id": self.tracer.get_span_id()
+            "extra_context": context or {},
+            "extra_trace_id": trace_id or self.tracer.get_trace_id(),
+            "extra_span_id": self.tracer.get_span_id()
         }
         log_level = getattr(logging, level)
         self.logger.log(log_level, message, extra=extra)
