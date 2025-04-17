@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -39,7 +39,7 @@ class UserRepository:
         repo = MongoRepository(self.db, "audit_logs")
         audit_data = {
             "action": action,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "details": details
         }
         return await repo.insert_one(audit_data)

@@ -28,7 +28,7 @@ def truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[:max_len - 3].rstrip() + "..."
 
 
-def generate_token(prefix: str = "token", user_id: str = None, ttl: int = 300) -> str:
+def generate_token(prefix: str = "token", user_id: str = None) -> str:
     """Generates a secure hashed token using SHA256 with timestamp and UUID."""
     now = datetime.now(UTC).isoformat()
     random_str = secrets.token_hex(8)

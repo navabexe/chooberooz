@@ -1,9 +1,13 @@
+# Path: src/api/v1/middleware/middleware.py
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
-from src.api.v1.middleware.error_handler import ErrorLoggingMiddleware
 from src.shared.config.settings import settings
-from src.shared.utilities.logging import log_info, log_error
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
+
+logger = LoggingService(LogConfig())
+
 
 async def log_requests_middleware(request: Request, call_next):
     """
@@ -18,33 +22,31 @@ async def log_requests_middleware(request: Request, call_next):
     """
     try:
         body = await request.json()
-        log_info(
+        logger.info(
             "Raw request body",
-            extra={"method": request.method, "url": str(request.url), "body": body},
+            context={"method": request.method, "url": str(request.url), "body": body},
         )
     except Exception as e:
-        log_error(
+        logger.error(
             "Failed to parse request body",
-            extra={"error": str(e), "method": request.method, "url": str(request.url)},
+            context={"error": str(e), "method": request.method, "url": str(request.url)},
         )
-    log_info(
+    logger.info(
         "Incoming request",
-        extra={"method": request.method, "url": str(request.url)},
+        context={"method": request.method, "url": str(request.url)},
     )
     return await call_next(request)
 
+
 def setup_middlewares(app: FastAPI):
     """
-    Configure FastAPI middlewares (CORS, error handling, request logging).
+    Configure FastAPI middlewares (CORS, request logging).
 
     Args:
         app: The FastAPI application instance.
     """
     # Add request logging middleware
     app.middleware("http")(log_requests_middleware)
-
-    # Add error logging middleware
-    app.add_middleware(ErrorLoggingMiddleware)
 
     # Add CORS middleware
     app.add_middleware(
@@ -54,7 +56,7 @@ def setup_middlewares(app: FastAPI):
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    log_info(
+    logger.info(
         "Middlewares configured",
-        extra={"cors_origins": settings.CORS_ORIGINS},
+        context={"cors_origins": settings.CORS_ORIGINS},
     )

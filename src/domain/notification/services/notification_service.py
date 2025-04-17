@@ -1,70 +1,130 @@
+# Path: src/domain/notification/services/notification_service.py
 from datetime import datetime, timezone
 from typing import List, Dict, Union
 
+import self
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
-from src.shared.errors.base import DatabaseConnectionException
-from src.shared.utilities.logging import log_error, log_info, log_warning
+from src.shared.errors.infrastructure.database import DatabaseConnectionError
+from src.shared.errors.domain.security import InvalidCredentialsError
+from src.shared.errors.base import BaseError
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
 from src.domain.notification.models.notification import Notification, NotificationChannel
 from src.domain.notification.services.builder import build_notification_content
 from src.infrastructure.storage.nosql.client import get_nosql_db
 from src.infrastructure.storage.nosql.repositories.base import MongoRepository
+from src.shared.utilities.types import LanguageCode
+from src.shared.utilities.constants import HttpStatus
 
 
 class NotificationService:
+    """Service for managing notifications."""
+
+    def __init__(self):
+        self.logger = LoggingService(LogConfig())
+
     async def validate_notification_input(
-        self,
-        receiver_id: str,
-        receiver_type: str,
-        template_key: str,
-        channel: NotificationChannel,
-        variables: dict = None,
-        language: str = "fa"
+            self,
+            receiver_id: str,
+            receiver_type: str,
+            template_key: str,
+            channel: NotificationChannel,
+            variables: dict = None,
+            language: LanguageCode = "fa"
     ) -> None:
         """Validate inputs for sending a notification."""
         if not receiver_id or not isinstance(receiver_id, str):
-            raise ValueError("Invalid receiver_id")
+            raise InvalidCredentialsError(
+                error_code="INVALID_INPUT",
+                message="Invalid receiver_id",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"receiver_id": receiver_id},
+                language=language
+            )
         if not receiver_type or not isinstance(receiver_type, str):
-            raise ValueError("Invalid receiver_type")
+            raise InvalidCredentialsError(
+                error_code="INVALID_INPUT",
+                message="Invalid receiver_type",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"receiver_type": receiver_type},
+                language=language
+            )
         if not template_key or not isinstance(template_key, str):
-            raise ValueError("Invalid template_key")
+            raise InvalidCredentialsError(
+                error_code="INVALID_INPUT",
+                message="Invalid template_key",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"template_key": template_key},
+                language=language
+            )
         if channel not in NotificationChannel:
-            raise ValueError(f"Unsupported channel: {channel}")
+            raise InvalidCredentialsError(
+                error_code="INVALID_INPUT",
+                message=f"Unsupported channel: {channel}",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"channel": channel},
+                language=language
+            )
         if language not in ["fa", "en"]:
-            raise ValueError(f"Unsupported language: {language}")
+            raise InvalidCredentialsError(
+                error_code="INVALID_INPUT",
+                message=f"Unsupported language: {language}",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"language": language},
+                language="en"
+            )
         if variables is not None and not isinstance(variables, dict):
-            raise ValueError("Variables must be a dictionary")
+            raise InvalidCredentialsError(
+                error_code="INVALID_INPUT",
+                message="Variables must be a dictionary",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"variables_type": type(variables)},
+                language=language
+            )
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(DatabaseConnectionException),
-        before_sleep=lambda retry_state: log_info(
+        retry=retry_if_exception_type(DatabaseConnectionError),
+        before_sleep=lambda retry_state: self.logger.info(
             "Retrying notification dispatch",
-            extra={"attempt": retry_state.attempt_number, "error": str(retry_state.outcome.exception())}
+            context={"attempt": retry_state.attempt_number, "error": str(retry_state.outcome.exception())}
         )
     )
     async def _dispatch_notification(
-        self,
-        receiver_id: str,
-        receiver_type: str,
-        title: str,
-        body: str,
-        channel: NotificationChannel = NotificationChannel.INAPP,
-        reference_type: str = None,
-        reference_id: str = None,
-        created_by: str = "system",
-        db: AsyncIOMotorDatabase = None
+            self,
+            receiver_id: str,
+            receiver_type: str,
+            title: str,
+            body: str,
+            channel: NotificationChannel = NotificationChannel.INAPP,
+            reference_type: str = None,
+            reference_id: str = None,
+            created_by: str = "system",
+            db: AsyncIOMotorDatabase = None
     ) -> str:
         """Dispatch a notification to MongoDB and log it."""
         if channel != NotificationChannel.INAPP:
-            raise ValueError(f"Channel {channel} not yet supported")
+            raise InvalidCredentialsError(
+                error_code="UNSUPPORTED_CHANNEL",
+                message=f"Channel {channel} not yet supported",
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"channel": channel},
+                language="en"
+            )
 
         # Ensure db is valid
         if db is None:
             db = await get_nosql_db()
-            log_info("Fetched db instance in _dispatch_notification", extra={"db_fetched": True})
+            self.logger.info("Fetched db instance in _dispatch_notification", context={"db_fetched": True})
 
         try:
             notification = Notification(
@@ -83,7 +143,15 @@ class NotificationService:
             notifications_repo = MongoRepository(db, "notifications")
             notification_id = await notifications_repo.insert_one(notification.model_dump(exclude_none=True))
             if not notification_id:
-                raise DatabaseConnectionException(db_type="MongoDB", detail="Failed to insert notification")
+                raise DatabaseConnectionError(
+                    db_type="MongoDB",
+                    error_code="DATABASE_CONNECTION_FAILED",
+                    message="Failed to insert notification",
+                    status_code=HttpStatus.INTERNAL_SERVER_ERROR.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={},
+                    language="en"
+                )
             notification.id = str(notification_id)
 
             audit_repo = MongoRepository(db, "audit_logs")
@@ -99,9 +167,17 @@ class NotificationService:
                 }
             })
             if not audit_id:
-                raise DatabaseConnectionException(db_type="MongoDB", detail="Failed to insert audit log")
+                raise DatabaseConnectionError(
+                    db_type="MongoDB",
+                    error_code="DATABASE_CONNECTION_FAILED",
+                    message="Failed to insert audit log",
+                    status_code=HttpStatus.INTERNAL_SERVER_ERROR.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={},
+                    language="en"
+                )
 
-            log_info("Notification dispatched", extra={
+            self.logger.info("Notification dispatched", context={
                 "notification_id": notification_id,
                 "receiver_id": receiver_id,
                 "receiver_type": receiver_type,
@@ -111,29 +187,36 @@ class NotificationService:
             })
             return notification_id
 
-        except DatabaseConnectionException as db_exc:
+        except DatabaseConnectionError as db_exc:
             raise
         except Exception as e:
-            raise Exception(f"Failed to dispatch notification: {str(e)}")
+            raise BaseError(
+                error_code="NOTIFICATION_DISPATCH_FAILED",
+                message=f"Failed to dispatch notification: {str(e)}",
+                status_code=HttpStatus.INTERNAL_SERVER_ERROR.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"error": str(e)},
+                language="en"
+            )
 
     async def _handle_notification_error(
-        self,
-        error: Exception,
-        receiver_id: str,
-        template_key: str,
-        return_bool: bool,
-        language: str,
-        db: AsyncIOMotorDatabase,
-        _is_retry: bool
+            self,
+            error: Exception,
+            receiver_id: str,
+            template_key: str,
+            return_bool: bool,
+            language: LanguageCode,
+            db: AsyncIOMotorDatabase,
+            _is_retry: bool
     ) -> Union[str, bool]:
         """Handle errors during notification sending."""
         error_type = "general"
-        if isinstance(error, ValueError):
+        if isinstance(error, InvalidCredentialsError):
             error_type = "template"
-        elif isinstance(error, DatabaseConnectionException):
+        elif isinstance(error, DatabaseConnectionError):
             error_type = "database"
 
-        log_error(f"Notification service failed ({error_type})", extra={
+        self.logger.error(f"Notification service failed ({error_type})", context={
             "receiver_id": receiver_id,
             "template_key": template_key,
             "error": str(error)
@@ -147,15 +230,15 @@ class NotificationService:
         raise error
 
     async def _handle_critical_failure(
-        self,
-        error: Exception,
-        receiver_id: str,
-        template_key: str,
-        db: AsyncIOMotorDatabase,
-        language: str = "fa"
+            self,
+            error: Exception,
+            receiver_id: str,
+            template_key: str,
+            db: AsyncIOMotorDatabase,
+            language: LanguageCode = "fa"
     ) -> None:
         """Handle critical notification failures."""
-        log_error("Critical notification failure", extra={
+        self.logger.error("Critical notification failure", context={
             "receiver_id": receiver_id,
             "template_key": template_key,
             "error": str(error),
@@ -174,19 +257,19 @@ class NotificationService:
                 _is_retry=True
             )
         except Exception as e:
-            log_error("Failed to notify admin of critical failure", extra={"error": str(e)})
+            self.logger.error("Failed to notify admin of critical failure", context={"error": str(e)})
 
     async def send_to_additional_receivers(
-        self,
-        additional_receivers: List[Dict[str, str]],
-        template_key: str,
-        channel: NotificationChannel,
-        variables: dict,
-        reference_type: str,
-        reference_id: str,
-        created_by: str,
-        language: str,
-        db: AsyncIOMotorDatabase
+            self,
+            additional_receivers: List[Dict[str, str]],
+            template_key: str,
+            channel: NotificationChannel,
+            variables: dict,
+            reference_type: str,
+            reference_id: str,
+            created_by: str,
+            language: LanguageCode,
+            db: AsyncIOMotorDatabase
     ) -> None:
         """Send notifications to additional receivers."""
         for receiver in additional_receivers or []:
@@ -204,20 +287,20 @@ class NotificationService:
             )
 
     async def send(
-        self,
-        receiver_id: str,
-        receiver_type: str,
-        template_key: str,
-        channel: NotificationChannel = NotificationChannel.INAPP,
-        variables: dict = None,
-        reference_type: str = None,
-        reference_id: str = None,
-        created_by: str = "system",
-        language: str = "fa",
-        return_bool: bool = False,
-        additional_receivers: List[Dict[str, str]] = None,
-        db: AsyncIOMotorDatabase = None,
-        _is_retry: bool = False
+            self,
+            receiver_id: str,
+            receiver_type: str,
+            template_key: str,
+            channel: NotificationChannel = NotificationChannel.INAPP,
+            variables: dict = None,
+            reference_type: str = None,
+            reference_id: str = None,
+            created_by: str = "system",
+            language: LanguageCode = "fa",
+            return_bool: bool = False,
+            additional_receivers: List[Dict[str, str]] = None,
+            db: AsyncIOMotorDatabase = None,
+            _is_retry: bool = False
     ) -> Union[str, bool]:
         """Send a notification with templated content."""
         await self.validate_notification_input(receiver_id, receiver_type, template_key, channel, variables, language)
@@ -235,7 +318,7 @@ class NotificationService:
                 created_by=created_by,
                 db=db
             )
-            log_info("Notification sent successfully", extra={
+            self.logger.info("Notification sent successfully", context={
                 "receiver_id": receiver_id,
                 "template_key": template_key,
                 "notification_id": notification_id
@@ -266,7 +349,7 @@ class NotificationService:
                 _is_retry=_is_retry
             )
 
-    async def send_otp_verified(self, phone: str, role: str, language: str, db: AsyncIOMotorDatabase) -> bool:
+    async def send_otp_verified(self, phone: str, role: str, language: LanguageCode, db: AsyncIOMotorDatabase) -> bool:
         """Send notification for OTP verification."""
         return await self.send(
             receiver_id=phone,
@@ -282,12 +365,12 @@ class NotificationService:
         )
 
     async def send_session_notification(
-        self,
-        user_id: str,
-        sessions: list,
-        ip: str,
-        language: str,
-        db: AsyncIOMotorDatabase
+            self,
+            user_id: str,
+            sessions: list,
+            ip: str,
+            language: LanguageCode,
+            db: AsyncIOMotorDatabase
     ) -> bool:
         """Send notification about session activity."""
         try:
@@ -354,7 +437,7 @@ class NotificationService:
             return True
 
         except Exception as e:
-            log_error("Session notification failed", extra={
+            self.logger.error("Session notification failed", context={
                 "user_id": user_id,
                 "ip": ip,
                 "error": str(e)

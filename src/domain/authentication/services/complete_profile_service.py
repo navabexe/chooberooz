@@ -1,32 +1,36 @@
-# path: src/domain/authentication/services/complete_profile_service.py
+# Path: src/domain/authentication/services/complete_profile_service.py
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from bson import ObjectId
 from fastapi import Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 import json
-
 from src.shared.base_service.base_service import BaseService
 from src.shared.config.settings import settings
-from src.shared.errors.base import BadRequestException, UnauthorizedException, ForbiddenException, TooManyRequestsException
 from src.shared.i18n.messages import get_message
 from src.shared.security.token import decode_token, generate_access_token, generate_refresh_token
-from src.shared.utilities.logging import log_info, log_error
 from src.shared.utilities.network import extract_client_ip
 from src.domain.notification.services.notification_service import NotificationService
 from src.domain.authentication.services.session_service import SessionService
 from src.infrastructure.storage.nosql.repositories.user_repository import UserRepository
 from src.infrastructure.storage.cache.repositories.otp_repository import OTPRepository
+from src.shared.errors.domain.security import InvalidCredentialsError, UnauthorizedAccessError, RateLimitExceededError
+from src.shared.utilities.time import utc_now
+from src.shared.utilities.types import LanguageCode
+from src.shared.utilities.constants import HttpStatus, DomainErrorCode
+
 
 class CompleteProfileService(BaseService):
+    """Service for completing user or vendor profiles."""
+
     def __init__(
-        self,
-        user_repo: UserRepository,
-        otp_repo: OTPRepository,
-        notification_service: NotificationService,
-        session_service: SessionService
+            self,
+            user_repo: UserRepository,
+            otp_repo: OTPRepository,
+            notification_service: NotificationService,
+            session_service: SessionService
     ):
         super().__init__()
         self.user_repo = user_repo
@@ -34,17 +38,19 @@ class CompleteProfileService(BaseService):
         self.notification_service = notification_service
         self.session_service = session_service
 
-    async def validate_business_categories(self, category_ids: List[str], language: str):
+    async def validate_business_categories(self, category_ids: List[str], language: LanguageCode):
         """Validate business category IDs."""
         query_ids = [ObjectId(cid) for cid in category_ids if ObjectId.is_valid(cid)]
         existing = await self.user_repo.find("business_categories", {"_id": {"$in": query_ids}})
         found_ids = {str(doc["_id"]) for doc in existing}
         invalid = set(category_ids) - found_ids
         if invalid:
-            raise BadRequestException(
-                detail=f"Invalid business category IDs: {', '.join(invalid)}",
-                message=get_message("invalid.business_category", language),
-                error_code="INVALID_CATEGORY",
+            raise InvalidCredentialsError(
+                error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                message=get_message("invalid.business_category", language=language),
+                status_code=HttpStatus.BAD_REQUEST.value,
+                trace_id=self.logger.tracer.get_trace_id(),
+                details={"invalid_ids": list(invalid)},
                 language=language
             )
 
@@ -60,27 +66,27 @@ class CompleteProfileService(BaseService):
         }
 
     async def complete_profile(
-        self,
-        temporary_token: str,
-        first_name: Optional[str] = None,
-        last_name: Optional[str] = None,
-        email: Optional[str] = None,
-        business_name: Optional[str] = None,
-        city: Optional[str] = None,
-        province: Optional[str] = None,
-        location: Optional[dict] = None,
-        address: Optional[str] = None,
-        business_category_ids: Optional[List[str]] = None,
-        visibility: Optional[str] = "COLLABORATIVE",
-        vendor_type: Optional[str] = None,
-        languages: Optional[List[str]] = None,
-        request: Optional[Request] = None,
-        language: str = settings.DEFAULT_LANGUAGE,
-        redis: Redis = None,
-        db: AsyncIOMotorDatabase = None,
-        request_id: Optional[str] = None,
-        client_version: Optional[str] = None,
-        device_fingerprint: Optional[str] = None
+            self,
+            temporary_token: str,
+            first_name: Optional[str] = None,
+            last_name: Optional[str] = None,
+            email: Optional[str] = None,
+            business_name: Optional[str] = None,
+            city: Optional[str] = None,
+            province: Optional[str] = None,
+            location: Optional[dict] = None,
+            address: Optional[str] = None,
+            business_category_ids: Optional[List[str]] = None,
+            visibility: Optional[str] = "COLLABORATIVE",
+            vendor_type: Optional[str] = None,
+            languages: Optional[List[str]] = None,
+            request: Optional[Request] = None,
+            language: LanguageCode = settings.DEFAULT_LANGUAGE,
+            redis: Redis = None,
+            db: AsyncIOMotorDatabase = None,
+            request_id: Optional[str] = None,
+            client_version: Optional[str] = None,
+            device_fingerprint: Optional[str] = None
     ) -> dict:
         """Complete user or vendor profile."""
         context = {
@@ -98,10 +104,14 @@ class CompleteProfileService(BaseService):
             attempts = await self.otp_repo.incr(rate_limit_key)
             await self.otp_repo.expire(rate_limit_key, settings.BLOCK_DURATION_OTP)
             if attempts > settings.MAX_PROFILE_COMPLETE_ATTEMPTS:
-                raise TooManyRequestsException(
-                    detail="Too many profile completion attempts.",
-                    message=get_message("profile.too_many", language),
-                    error_code="PROFILE_RATE_LIMIT",
+                raise RateLimitExceededError(
+                    endpoint="complete_profile",
+                    limit=settings.MAX_PROFILE_COMPLETE_ATTEMPTS,
+                    error_code=DomainErrorCode.RATE_LIMIT_EXCEEDED.value,
+                    message=get_message("profile.too_many", language=language),
+                    status_code=HttpStatus.TOO_MANY_REQUESTS.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={"token": temporary_token},
                     language=language
                 )
 
@@ -113,36 +123,49 @@ class CompleteProfileService(BaseService):
             context["entity_id"] = phone
 
             if not phone or role not in ["user", "vendor"]:
-                raise UnauthorizedException(
-                    detail="Invalid token payload.",
-                    message=get_message("token.invalid", language),
-                    error_code="INVALID_TOKEN",
+                raise UnauthorizedAccessError(
+                    resource="profile_completion",
+                    error_code=DomainErrorCode.UNAUTHORIZED_ACCESS.value,
+                    message=get_message("token.invalid", language=language),
+                    status_code=HttpStatus.UNAUTHORIZED.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={},
                     language=language
                 )
 
             temp_key = f"temp_token:{jti}"
             stored_phone = await self.otp_repo.get(temp_key)
             if stored_phone != phone:
-                raise BadRequestException(
-                    detail="Temporary token is invalid or expired.",
-                    message=get_message("otp.expired", language),
-                    error_code="TOKEN_EXPIRED",
+                raise InvalidCredentialsError(
+                    error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                    message=get_message("otp.expired", language=language),
+                    status_code=HttpStatus.BAD_REQUEST.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={},
                     language=language
                 )
 
             # Validate role-specific inputs
-            if role == "user" and any([business_name, business_category_ids, city, province, location, address, vendor_type]):
-                raise ForbiddenException(
-                    detail="User cannot provide vendor-specific fields.",
-                    message=get_message("auth.forbidden", language),
-                    error_code="INVALID_FIELDS",
+            if role == "user" and any(
+                    [business_name, business_category_ids, city, province, location, address, vendor_type]):
+                raise UnauthorizedAccessError(
+                    resource="vendor_fields",
+                    error_code=DomainErrorCode.UNAUTHORIZED_ACCESS.value,
+                    message=get_message("auth.forbidden", language=language),
+                    status_code=HttpStatus.FORBIDDEN.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={"invalid_fields": [k for k, v in locals().items() if
+                                                v and k in ["business_name", "business_category_ids", "city",
+                                                            "province", "location", "address", "vendor_type"]]},
                     language=language
                 )
             if role == "vendor" and not business_name:
-                raise BadRequestException(
-                    detail="Business name is required for vendor.",
-                    message=get_message("vendor.not_eligible", language),
-                    error_code="MISSING_BUSINESS_NAME",
+                raise InvalidCredentialsError(
+                    error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                    message=get_message("vendor.not_eligible", language=language),
+                    status_code=HttpStatus.BAD_REQUEST.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={"missing_field": "business_name"},
                     language=language
                 )
 
@@ -150,23 +173,29 @@ class CompleteProfileService(BaseService):
             collection = f"{role}s"
             user = await self.user_repo.find_user(collection, phone)
             if not user or user.get("status") not in ["incomplete", "pending"]:
-                raise BadRequestException(
-                    detail="User is not eligible to complete profile.",
-                    message=get_message(f"{role}.not_eligible", language),
-                    error_code="INELIGIBLE_PROFILE",
+                raise InvalidCredentialsError(
+                    error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                    message=get_message(f"{role}.not_eligible", language=language),
+                    status_code=HttpStatus.BAD_REQUEST.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={"status": user.get("status") if user else None},
                     language=language
                 )
 
             user_id = str(user["_id"])
-            update_data = {"updated_at": datetime.utcnow()}
+            update_data = {"updated_at": utc_now(),}
 
             # Update user data
             if role == "user":
                 if not first_name or not last_name:
-                    raise BadRequestException(
-                        detail="First name and last name are required.",
-                        message=get_message("auth.profile.incomplete", language),
-                        error_code="MISSING_FIELDS",
+                    raise InvalidCredentialsError(
+                        error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                        message=get_message("auth.profile.incomplete", language=language),
+                        status_code=HttpStatus.BAD_REQUEST.value,
+                        trace_id=self.logger.tracer.get_trace_id(),
+                        details={
+                            "missing_fields": [k for k, v in {"first_name": first_name, "last_name": last_name}.items()
+                                               if not v]},
                         language=language
                     )
                 update_data.update({
@@ -185,17 +214,21 @@ class CompleteProfileService(BaseService):
                 if business_category_ids:
                     await self.validate_business_categories(business_category_ids, language)
                 if visibility and visibility not in settings.VALID_VISIBILITY:
-                    raise BadRequestException(
-                        detail=f"Visibility must be one of {settings.VALID_VISIBILITY}",
-                        message=get_message("invalid.visibility", language),
-                        error_code="INVALID_VISIBILITY",
+                    raise InvalidCredentialsError(
+                        error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                        message=get_message("invalid.visibility", language=language),
+                        status_code=HttpStatus.BAD_REQUEST.value,
+                        trace_id=self.logger.tracer.get_trace_id(),
+                        details={"valid_options": settings.VALID_VISIBILITY},
                         language=language
                     )
                 if vendor_type and vendor_type not in settings.VALID_VENDOR_TYPES:
-                    raise BadRequestException(
-                        detail=f"Vendor type must be one of {settings.VALID_VENDOR_TYPES}",
-                        message=get_message("invalid.vendor_type", language),
-                        error_code="INVALID_VENDOR_TYPE",
+                    raise InvalidCredentialsError(
+                        error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                        message=get_message("invalid.vendor_type", language=language),
+                        status_code=HttpStatus.BAD_REQUEST.value,
+                        trace_id=self.logger.tracer.get_trace_id(),
+                        details={"valid_options": settings.VALID_VENDOR_TYPES},
                         language=language
                     )
                 update_data.update({
@@ -208,17 +241,20 @@ class CompleteProfileService(BaseService):
                     "vendor_type": vendor_type,
                     "preferred_languages": languages or user.get("preferred_languages", []),
                     "business_category_ids": business_category_ids or [],
-                    "status": "pending" if all([business_name, city, province, location, address, business_category_ids]) else "incomplete"
+                    "status": "pending" if all(
+                        [business_name, city, province, location, address, business_category_ids]) else "incomplete"
                 })
 
             # Update user in database
             await self.user_repo.update_user(collection, user_id, update_data)
             updated_user = await self.user_repo.find_user(collection, phone)
             if not updated_user:
-                raise BadRequestException(
-                    detail="Failed to update profile.",
-                    message=get_message("server.error", language),
-                    error_code="UPDATE_FAILED",
+                raise InvalidCredentialsError(
+                    error_code=DomainErrorCode.INVALID_CREDENTIALS.value,
+                    message=get_message("server.error", language=language),
+                    status_code=HttpStatus.BAD_REQUEST.value,
+                    trace_id=self.logger.tracer.get_trace_id(),
+                    details={},
                     language=language
                 )
 
@@ -258,7 +294,8 @@ class CompleteProfileService(BaseService):
                     "jti": session_id
                 }
                 # Convert values to strings for Redis compatibility
-                session_data_cleaned = {k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) for k, v in session_data.items()}
+                session_data_cleaned = {k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) for k, v in
+                                        session_data.items()}
                 await self.otp_repo.hset(session_key, mapping=session_data_cleaned)
                 await self.otp_repo.expire(session_key, settings.SESSION_EXPIRY)
                 await self.otp_repo.setex(
@@ -279,7 +316,7 @@ class CompleteProfileService(BaseService):
                 "client_version": client_version
             }
             await self.user_repo.log_audit(f"{role}_profile_completed", audit_data)
-            log_info("Profile completed", extra=audit_data)
+            self.logger.info("Profile completed", context=audit_data)
 
             # Send notifications
             notification_sent = await self.notification_service.send(
@@ -331,7 +368,7 @@ class CompleteProfileService(BaseService):
                 "data": response_data,
                 "message": get_message(
                     "auth.profile.pending" if updated_user["status"] == "pending" else "auth.profile.completed",
-                    language
+                    language=language
                 )
             }
 

@@ -1,22 +1,30 @@
+# Path: src/api/v1/endpoints/auth/request_otp.py
 from typing import Annotated, Coroutine, Any, Union
 from fastapi import APIRouter, Request, Depends, status
 from pydantic import BaseModel, Field
 from redis.exceptions import ConnectionError as RedisConnectionError
-
 from src.shared.config.settings import settings
 from src.shared.utilities.network import extract_client_ip
-from src.shared.utilities.logging import log_info, log_error
 from src.shared.models.responses.base import StandardResponse, ErrorResponse
 from src.shared.i18n.messages import get_message
-from src.shared.errors.base import TooManyRequestsException, BadRequestException
 from src.domain.authentication.models.otp import RequestOTPInput
 from src.api.v1.dependencies.permissions import check_permissions
 from src.api.v1.middleware.database_check import check_database_connection
 from src.infrastructure.di.container import container
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
+from src.shared.errors.domain.security import RateLimitExceededError, InvalidCredentialsError
+from src.shared.errors.base import BaseError
+from src.shared.errors.infrastructure.database import CacheError
+from src.shared.utilities.constants import HttpStatus, DomainErrorCode
 
 router = APIRouter(prefix="/api/v1", tags=[settings.AUTH_TAG])
 
+logger = LoggingService(LogConfig())
+
+
 class RequestOTPResponse(BaseModel):
+    """Response model for OTP request."""
     temporary_token: str = Field(
         ...,
         description="A temporary JWT token",
@@ -33,9 +41,11 @@ class RequestOTPResponse(BaseModel):
         json_schema_extra={"example": True}
     )
 
+
 def check_otp_permission(role: str) -> Coroutine[Any, Any, str]:
     """Check if the role has permission to request OTP."""
     return check_permissions(role, "write:otp")
+
 
 async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: str, context: dict) -> dict:
     """Call OTP service to request an OTP."""
@@ -54,7 +64,7 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
             device_fingerprint=data.device_fingerprint,
             user_agent=request.headers.get("User-Agent", "Unknown")
         )
-        log_info("OTP request successful", extra={
+        logger.info("OTP request successful", context={
             "phone": data.phone,
             "role": data.role,
             "purpose": data.purpose,
@@ -66,13 +76,17 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
         })
         return result
     except RedisConnectionError as e:
-        log_error("Redis connection failed during OTP request", extra={"error": str(e)})
-        raise BadRequestException(
-            detail="Redis unavailable.",
-            message=get_message("server.error", data.response_language),
-            error_code="REDIS_ERROR",
+        logger.error("Redis connection failed during OTP request", context={"error": str(e)})
+        raise CacheError(
+            operation="connect",
+            error_code="CACHE_ERROR",
+            message=get_message("server.error", language=data.response_language),
+            status_code=HttpStatus.INTERNAL_SERVER_ERROR.value,
+            trace_id=logger.tracer.get_trace_id(),
+            details={"error": str(e)},
             language=data.response_language
         )
+
 
 @router.post(
     "/request-otp",
@@ -130,12 +144,13 @@ async def call_otp_service(data: RequestOTPInput, request: Request, client_ip: s
     }
 )
 async def request_otp_endpoint(
-    data: RequestOTPInput,
-    request: Request,
-    client_ip: Annotated[str, Depends(extract_client_ip)],
-    context: dict = Depends(check_database_connection),
+        data: RequestOTPInput,
+        request: Request,
+        client_ip: Annotated[str, Depends(extract_client_ip)],
+        context: dict = Depends(check_database_connection),
 ) -> Union[StandardResponse, ErrorResponse]:
-    """Request an OTP for authentication.
+    """
+    Request an OTP for authentication.
 
     Args:
         data: Input data including phone, role, purpose, and optional device fingerprint.
@@ -146,7 +161,7 @@ async def request_otp_endpoint(
     Returns:
         StandardResponse with OTP details or ErrorResponse if failed.
     """
-    log_info("Received request body", extra={
+    logger.info("Received request body", context={
         "body": data.model_dump(),
         "device_fingerprint": data.device_fingerprint
     })
@@ -163,30 +178,30 @@ async def request_otp_endpoint(
             code=status.HTTP_200_OK
         )
 
-    except TooManyRequestsException as e:
-        log_error("Too many OTP requests", extra={"error": e.detail, "phone": data.phone})
+    except RateLimitExceededError as e:
+        logger.error("Too many OTP requests", context={"error": e.message, "phone": data.phone})
         return ErrorResponse(
-            detail=e.detail,
+            detail=e.message,
             message=e.message,
             error_code=e.error_code,
-            metadata=e.metadata
+            metadata=e.details
         )
-    except BadRequestException as e:
-        log_error("Invalid OTP request", extra={
-            "error": e.detail,
+    except InvalidCredentialsError as e:
+        logger.error("Invalid OTP request", context={
+            "error": e.message,
             "phone": data.phone,
             "error_code": e.error_code,
             "device_fingerprint": data.device_fingerprint
         })
         return ErrorResponse(
-            detail=e.detail,
+            detail=e.message,
             message=e.message,
             error_code=e.error_code,
-            metadata=e.metadata
+            metadata=e.details
         )
     except Exception as e:
         import traceback
-        log_error("Failed to request OTP", extra={
+        logger.error("Failed to request OTP", context={
             "type": str(type(e)),
             "error": str(e),
             "repr": repr(e),
@@ -198,6 +213,7 @@ async def request_otp_endpoint(
         })
         return ErrorResponse(
             detail=str(e),
-            message=get_message("server.error", data.response_language),
-            error_code="SERVER_ERROR"
+            message=get_message("server.error", language=data.response_language),
+            error_code="SERVER_ERROR",
+            status="error"
         )

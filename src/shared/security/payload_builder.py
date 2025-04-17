@@ -1,26 +1,29 @@
+# Path: src/domain/authentication/jwt_utils.py
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import uuid4
 
+from passlib.exc import InvalidTokenError
+
 from src.shared.config.settings import settings
-from src.shared.utilities.logging import log_info, log_error
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
 from src.domain.authentication.models.token import UserJWTProfile, VendorJWTProfile
 
+logger = LoggingService(LogConfig())
 
 ALLOWED_LANGUAGES = ["fa", "en", "ar"]
 
-
 def get_profile_language(role: str, user_data: Optional[dict], vendor_data: Optional[dict]) -> str:
     """Extract the preferred language from user or vendor profile, defaulting to 'fa'."""
-    log_info("Extracting profile language", extra={"role": role})
+    logger.info("Extracting profile language", context={"role": role})
     profile_data = user_data if role == "user" else vendor_data
     if profile_data and "preferred_languages" in profile_data and profile_data["preferred_languages"]:
         lang = profile_data["preferred_languages"][0]
-        log_info("Found language in profile", extra={"language": lang, "allowed": ALLOWED_LANGUAGES})
+        logger.info("Found language in profile", context={"language": lang, "allowed": ALLOWED_LANGUAGES})
         return lang if lang in ALLOWED_LANGUAGES else "fa"
-    log_info("No language found in profile, defaulting to 'fa'")
+    logger.info("No language found in profile, defaulting to 'fa'", context={})
     return "fa"
-
 
 def build_jwt_payload(
     *,
@@ -43,7 +46,7 @@ def build_jwt_payload(
     language: Optional[str] = "fa",
 ) -> dict:
     """Build a standardized JWT payload with the provided claims."""
-    log_info("Building JWT payload", extra={
+    logger.info("Building JWT payload", context={
         "token_type": token_type,
         "role": role,
         "subject_id": subject_id,
@@ -52,16 +55,16 @@ def build_jwt_payload(
 
     now = int(datetime.now(timezone.utc).timestamp())
     exp = now + expires_in
-    log_info("Calculated timestamps", extra={"iat": now, "exp": exp})
+    logger.info("Calculated timestamps", context={"iat": now, "exp": exp})
 
     effective_language = get_profile_language(role, user_data, vendor_data) or language
-    log_info("Determined effective language", extra={"language": effective_language})
+    logger.info("Determined effective language", context={"language": effective_language})
 
     jti = jti or str(uuid4())
-    log_info("Generated or used JTI", extra={"jti": jti})
+    logger.info("Generated or used JTI", context={"jti": jti})
 
     effective_audience = audience or default_audience(token_type, role)
-    log_info("Set audience", extra={"audience": effective_audience})
+    logger.info("Set audience", context={"audience": effective_audience})
 
     payload = {
         "iss": issuer,
@@ -74,68 +77,88 @@ def build_jwt_payload(
         "exp": exp,
         "language": effective_language,
     }
-    log_info("Initialized base payload", extra={"payload": payload})
+    logger.info("Initialized base payload", context={"payload": payload})
 
     if phone:
         payload["phone"] = phone
-        log_info("Added phone to payload", extra={"phone": phone})
+        logger.info("Added phone to payload", context={"phone": phone})
     if session_id:
         payload["session_id"] = session_id
-        log_info("Added session_id to payload", extra={"session_id": session_id})
+        logger.info("Added session_id to payload", context={"session_id": session_id})
     if status is not None:
         payload["status"] = status
-        log_info("Added status to payload", extra={"status": status})
+        logger.info("Added status to payload", context={"status": status})
     if phone_verified is not None:
         payload["phone_verified"] = phone_verified
-        log_info("Added phone_verified to payload", extra={"phone_verified": phone_verified})
+        logger.info("Added phone_verified to payload", context={"phone_verified": phone_verified})
     if scopes:
         payload["scopes"] = scopes
-        log_info("Added scopes to payload", extra={"scopes": scopes})
+        logger.info("Added scopes to payload", context={"scopes": scopes})
     if amr:
         payload["amr"] = amr
-        log_info("Added amr to payload", extra={"amr": amr})
+        logger.info("Added amr to payload", context={"amr": amr})
     if vendor_id:
         payload["vendor_id"] = vendor_id
-        log_info("Added vendor_id to payload", extra={"vendor_id": vendor_id})
+        logger.info("Added vendor_id to payload", context={"vendor_id": vendor_id})
 
     if token_type in ["access", "refresh"]:
         if role == "user" and user_data:
             try:
                 user_profile = UserJWTProfile(**user_data).model_dump()
                 payload["user_profile"] = user_profile
-                log_info("Added user profile to payload", extra={"user_profile": user_profile})
+                logger.info("Added user profile to payload", context={"user_profile": user_profile})
             except Exception as e:
-                log_error("Failed to add user profile", extra={"error": str(e), "user_data": user_data})
-                raise
+                logger.error("Failed to add user profile", context={"error": str(e), "user_data": user_data})
+                raise InvalidTokenError(
+                    error_code="INVALID_TOKEN_PROFILE",
+                    message=f"Failed to build user profile: {str(e)}",
+                    status_code=400,
+                    trace_id=logger.tracer.get_trace_id(),
+                    details={"error": str(e)},
+                    language="en"
+                )
         elif role == "vendor" and vendor_data:
             try:
-                log_info("Attempting to build vendor profile", extra={"vendor_data": vendor_data})
+                logger.info("Attempting to build vendor profile", context={"vendor_data": vendor_data})
                 vendor_profile = VendorJWTProfile(**vendor_data).model_dump()
                 payload["vendor_profile"] = vendor_profile
-                log_info("Added vendor profile to payload", extra={"vendor_profile": vendor_profile})
+                logger.info("Added vendor profile to payload", context={"vendor_profile": vendor_profile})
             except Exception as e:
-                log_error("Failed to add vendor profile", extra={"error": str(e), "vendor_data": vendor_data})
-                raise
+                logger.error("Failed to add vendor profile", context={"error": str(e), "vendor_data": vendor_data})
+                raise InvalidTokenError(
+                    error_code="INVALID_TOKEN_PROFILE",
+                    message=f"Failed to build vendor profile: {str(e)}",
+                    status_code=400,
+                    trace_id=logger.tracer.get_trace_id(),
+                    details={"error": str(e)},
+                    language="en"
+                )
 
-    log_info("Completed JWT payload", extra={"payload": payload})
+    logger.info("Completed JWT payload", context={"payload": payload})
     return payload
-
 
 def default_audience(token_type: str, role: Optional[str] = None) -> List[str]:
     """Return the default audience based on token type and role."""
-    log_info("Determining default audience", extra={"token_type": token_type, "role": role})
+    logger.info("Determining default audience", context={"token_type": token_type, "role": role})
     if token_type == "access":
         audience = ["api", "vendor-panel"] if role == "vendor" else ["api"]
-        log_info("Set audience for access token", extra={"audience": audience})
+        logger.info("Set audience for access token", context={"audience": audience})
         return audience
     elif token_type == "refresh":
         audience = ["auth-service"]
-        log_info("Set audience for refresh token", extra={"audience": audience})
+        logger.info("Set audience for refresh token", context={"audience": audience})
         return audience
     elif token_type == "temp":
         audience = ["auth-temp"]
-        log_info("Set audience for temp token", extra={"audience": audience})
+        logger.info("Set audience for temp token", context={"audience": audience})
         return audience
     else:
-        log_error("Unknown token type for audience", extra={"token_type": token_type})
-        raise ValueError(f"Unknown token type: {token_type}")
+        logger.error("Unknown token type for audience", context={"token_type": token_type})
+        raise InvalidTokenError(
+            error_code="INVALID_TOKEN_TYPE",
+            message=f"Unknown token type: {token_type}",
+            status_code=400,
+            trace_id=logger.tracer.get_trace_id(),
+            details={"token_type": token_type},
+            language="en"
+        )

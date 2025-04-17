@@ -29,3 +29,4 @@ aiohttp~=3.11.16
 sentry-sdk~=2.25.1
 fastapi~=0.115.12
 tenacity~=8.5.0
+colorama==0.4.6

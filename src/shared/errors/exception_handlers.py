@@ -1,37 +1,32 @@
-# path: src/shared/errors/exception_handlers.py
+# Path: src/shared/errors/exception_handlers.py
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_500_INTERNAL_SERVER_ERROR
-
-from src.shared.utilities.logging import log_error
-from src.shared.models.responses.base import ErrorResponse
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
 from src.shared.i18n.messages import get_message
-from src.shared.errors.base import AppHTTPException
+from src.shared.errors.base import BaseError
+from src.shared.errors.router import ErrorRouter
 from src.shared.utilities.language import extract_language
+from src.shared.utilities.constants import HttpStatus, DomainErrorCode
+
+logger = LoggingService(LogConfig())
+error_router = ErrorRouter(logger)
+
 
 def register_exception_handlers(app: FastAPI):
-    def build_error_response(
-            status_code: int,
-            detail: str,
-            message: Optional[str] = None,
-            error_code: Optional[str] = None,
-            metadata: Optional[Dict[str, Any]] = None
-    ):
-        return JSONResponse(
-            status_code=status_code,
-            content=ErrorResponse(
-                detail=detail,
-                message=message or detail,
-                error_code=error_code,
-                status="error",
-                metadata=metadata
-            ).model_dump()
-        )
+    """
+    Register exception handlers for FastAPI application.
+
+    Args:
+        app: The FastAPI application instance.
+    """
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Handle validation errors."""
         language = extract_language(request)
         errors = exc.errors()
         details = []
@@ -42,72 +37,70 @@ def register_exception_handlers(app: FastAPI):
             details.append(f"{field}: {msg}")
 
         error_message = "; ".join(details)
-        log_error("Validation error", extra={
+        error = BaseError(
+            error_code=DomainErrorCode.VALIDATION_ERROR.value,
+            message=get_message("server.error", language=language),
+            status_code=HTTP_400_BAD_REQUEST,
+            trace_id=logger.tracer.get_trace_id(),
+            details={"errors": error_message},
+            language=language
+        )
+
+        logger.error("Validation error", context={
             "path": request.url.path,
             "method": request.method,
             "errors": error_message,
             "language": language
         })
 
-        return build_error_response(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail=error_message,
-            message=get_message("server.error", language),
-            error_code="VALIDATION_ERROR"
+        response = error_router.route(error)
+        return JSONResponse(
+            status_code=response.status_code,
+            content=response.model_dump()
         )
 
-    @app.exception_handler(AppHTTPException)
-    async def custom_http_exception_handler(request: Request, exc: AppHTTPException):
+    @app.exception_handler(BaseError)
+    async def base_error_handler(request: Request, exc: BaseError):
+        """Handle custom BaseError exceptions."""
         language = exc.language or extract_language(request)
-        log_error("Custom HTTPException caught", extra={
+        logger.error("Custom BaseError caught", context={
             "path": request.url.path,
             "method": request.method,
             "status_code": exc.status_code,
-            "detail": exc.detail,
+            "detail": exc.message,
             "error_code": exc.error_code,
-            "metadata": exc.metadata,
+            "details": exc.details,
             "language": language
         })
 
-        return build_error_response(
-            status_code=exc.status_code,
-            detail=exc.detail,
-            message=exc.message,
-            error_code=exc.error_code,
-            metadata=exc.metadata
-        )
-
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException):
-        language = extract_language(request)
-        log_error("HTTPException caught", extra={
-            "path": request.url.path,
-            "method": request.method,
-            "status_code": exc.status_code,
-            "detail": str(exc.detail),
-            "language": language
-        })
-
-        return build_error_response(
-            status_code=exc.status_code,
-            detail=str(exc.detail),
-            message=get_message("server.error", language),
-            error_code="HTTP_ERROR"
+        response = error_router.route(exc)
+        return JSONResponse(
+            status_code=response.status_code,
+            content=response.model_dump()
         )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
+        """Handle uncaught exceptions."""
         language = extract_language(request)
-        log_error("Unhandled exception", extra={
+        error = BaseError(
+            error_code="INTERNAL_SERVER_ERROR",
+            message=get_message("server.error", language=language),
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            trace_id=logger.tracer.get_trace_id(),
+            details={"error": str(exc)},
+            language=language
+        )
+
+        logger.error("Unhandled exception", context={
             "path": request.url.path,
             "method": request.method,
             "error": str(exc),
             "language": language
-        }, exc_info=True)
+        })
 
-        return build_error_response(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error occurred.",
-            message=get_message("server.error", language),
-            error_code="INTERNAL_SERVER_ERROR"
+        response = error_router.route(error)
+        return JSONResponse(
+            status_code=response.status_code,
+            content=response.model_dump()
         )

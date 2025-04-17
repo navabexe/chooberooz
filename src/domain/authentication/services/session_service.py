@@ -1,22 +1,27 @@
+# Path: src/domain/authentication/session.py
 from datetime import datetime, timezone
 from typing import Dict, List, Literal
 from uuid import uuid4
-
 from redis.asyncio import Redis
-
 from src.shared.config.settings import settings
 from src.shared.security.token import generate_access_token, generate_refresh_token
-from src.shared.utilities.logging import log_info, log_error
+from src.shared.utilities.constants import HttpStatus
 from src.shared.utilities.network import get_location_from_ip
 from src.shared.utilities.text import safe_json_dumps, decode_value
 from src.domain.authentication.models.session import fetch_sessions_from_redis
 from src.domain.authentication.models.token import VendorJWTProfile
 from src.domain.notification.services.notification_service import notification_service
 from src.infrastructure.storage.cache.repositories.otp_repository import OTPRepository
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
+from src.shared.errors.domain.security import InvalidTokenError
+from src.shared.utilities.types import LanguageCode
+
+logger = LoggingService(LogConfig())
 
 
 def stringify_session_data(data: dict) -> dict:
-    """Convert all values in session_data to byte-safe strings. JSON-dump any dict, list, tuple values."""
+    """Convert all values in session_data to byte-safe strings."""
     result = {}
     for k, v in data.items():
         if v is None:
@@ -30,16 +35,16 @@ def stringify_session_data(data: dict) -> dict:
 
 
 async def create_user_session(
-    *,
-    user_id: str,
-    phone: str,
-    role: str,
-    user: dict,
-    redis: Redis,
-    client_ip: str,
-    user_agent: str,
-    language: str,
-    now: datetime
+        *,
+        user_id: str,
+        phone: str,
+        role: str,
+        user: dict,
+        redis: Redis,
+        client_ip: str,
+        user_agent: str,
+        language: LanguageCode,
+        now: datetime
 ) -> dict:
     """Create a user session and store it in Redis, returning access and refresh tokens."""
     session_id = str(uuid4())
@@ -64,7 +69,7 @@ async def create_user_session(
 
     session_data_cleaned = stringify_session_data(session_data)
 
-    log_info("Session data to be stored in Redis", extra={"cleaned_data": session_data_cleaned})
+    logger.info("Session data to be stored in Redis", context={"cleaned_data": session_data_cleaned})
 
     session_key = f"sessions:{user_id}:{session_id}"
     await redis.hset(name=session_key, mapping=session_data_cleaned)
@@ -106,7 +111,9 @@ async def create_user_session(
 
 class SessionService:
     """Service for managing user sessions."""
+
     def __init__(self, redis: Redis = None):
+        """Initialize session service with Redis repository."""
         self.repo = OTPRepository(redis)
 
     async def delete_incomplete_sessions(self, user_id: str):
@@ -117,15 +124,15 @@ class SessionService:
             status = session_data.get(b"status") or session_data.get("status", b"")
             if decode_value(status) != "active":
                 await self.repo.delete(key)
-                log_info("Deleted incomplete session", extra={"user_id": user_id, "session_key": key})
+                logger.info("Deleted incomplete session", context={"user_id": user_id, "session_key": key})
 
     async def get_sessions(
-        self,
-        user_id: str,
-        status_filter: Literal["active", "all"] = "active",
-        language: str = "fa",
-        requester_role: str = "vendor",
-        client_ip: str = "unknown",
+            self,
+            user_id: str,
+            status_filter: Literal["active", "all"] = "active",
+            language: LanguageCode = "fa",
+            requester_role: str = "vendor",
+            client_ip: str = "unknown",
     ) -> dict:
         """Retrieve user sessions from Redis with optional status filtering."""
         redis = await self.repo.redis
@@ -141,13 +148,21 @@ class SessionService:
                     language=language
                 )
             except Exception as e:
-                log_error("Session notification failed", extra={
+                logger.error("Session notification failed", context={
                     "user_id": user_id,
                     "ip": client_ip,
                     "error": str(e)
                 })
+                raise InvalidTokenError(
+                    error_code="NOTIFICATION_FAILED",
+                    message=f"Session notification failed: {str(e)}",
+                    status_code=HttpStatus.INTERNAL_SERVER_ERROR.value,
+                    trace_id=logger.tracer.get_trace_id(),
+                    details={"error": str(e), "user_id": user_id},
+                    language=language
+                )
 
-        log_info("Sessions retrieved successfully", extra={
+        logger.info("Sessions retrieved successfully", context={
             "user_id": user_id,
             "session_count": len(sessions),
             "status_filter": status_filter

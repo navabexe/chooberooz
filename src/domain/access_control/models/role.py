@@ -3,6 +3,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
+from src.shared.utilities.time import utc_now
+
 
 class Role(BaseModel):
     """Model representing a role entity."""
@@ -13,12 +15,12 @@ class Role(BaseModel):
     users_count: int = Field(default=0, description="Number of users assigned to this role")
     created_by: Optional[str] = Field(default=None, description="ID of the creator")
     created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat(),
+        default_factory=lambda: utc_now(),
         description="Creation timestamp"
     )
     updated_by: Optional[str] = Field(default=None, description="ID of the last updater")
     updated_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat(),
+        default_factory=lambda: utc_now(),
         description="Last update timestamp"
     )
 

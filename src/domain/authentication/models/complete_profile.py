@@ -1,6 +1,6 @@
 # path: src/domain/authentication/models/complete_profile.py
 from typing import Optional, Literal, List
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
+from pydantic import Field, ConfigDict, EmailStr, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from src.shared.config.settings import settings

@@ -1,15 +1,20 @@
+# Path: src/domain/authentication/models/session.py
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
-
 from pydantic import BaseModel, Field, ConfigDict
 from redis.asyncio import Redis
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
+from src.shared.errors.base import BaseError
+from src.shared.utilities.constants import HttpStatus
 
-from src.shared.utilities.logging import log_info, log_warning
+logger = LoggingService(LogConfig())
 
 
 class Session(BaseModel):
     """Model representing a user session."""
+
     id: str = Field(default_factory=lambda: str(uuid4()), description="Unique session identifier")
     user_id: str = Field(..., description="Identifier of the user owning the session")
     device_name: Optional[str] = Field(default=None, description="Name of the device")
@@ -48,7 +53,7 @@ async def fetch_sessions_from_redis(redis: Redis, user_id: str, status_filter: s
     pattern = f"sessions:{user_id}:*"
     session_keys = [key async for key in redis.scan_iter(match=pattern)]
 
-    log_info("Scanning session keys", extra={"pattern": pattern, "key_count": len(session_keys)})
+    logger.info("Scanning session keys", context={"pattern": pattern, "key_count": len(session_keys)})
 
     sessions = []
     for key in session_keys:
@@ -79,6 +84,14 @@ async def fetch_sessions_from_redis(redis: Redis, user_id: str, status_filter: s
             session_dict["ttl"] = get_session_ttl(int(session_data.get("exp", "0")))
             sessions.append(session_dict)
         except Exception as e:
-            log_warning("Skipping invalid session entry", extra={"key": key, "error": str(e)})
+            logger.warning("Skipping invalid session entry", context={"key": key, "error": str(e)})
+            raise BaseError(
+                error_code="INVALID_SESSION_DATA",
+                message=f"Invalid session data: {str(e)}",
+                status_code=HttpStatus.INTERNAL_SERVER_ERROR.value,
+                trace_id=logger.tracer.get_trace_id(),
+                details={"key": key, "error": str(e)},
+                language="en"
+            )
 
     return sessions

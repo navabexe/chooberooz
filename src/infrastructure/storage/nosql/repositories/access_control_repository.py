@@ -1,19 +1,22 @@
+# Path: src/domain/access_control/repository.py
 from typing import List, Optional
-
 from motor.motor_asyncio import AsyncIOMotorDatabase
-
-from src.shared.utilities.logging import log_error
 from src.domain.access_control.models.permission import Permission
 from src.domain.access_control.models.role import Role
 from src.domain.access_control.models.user_role import UserRole
+from src.shared.logging.service import LoggingService
+from src.shared.logging.config import LogConfig
 
 
 class MongoAccessControlRepository:
     """Repository for managing roles, permissions, and user-role assignments in MongoDB."""
+
     def __init__(self, db: AsyncIOMotorDatabase):
+        """Initialize repository with database and logger."""
         self.roles = db["roles"]
         self.permissions = db["permissions"]
         self.user_roles = db["user_roles"]
+        self.logger = LoggingService(LogConfig())
 
     async def create_permission(self, permission: Permission) -> str:
         """Create a new permission."""
@@ -47,7 +50,7 @@ class MongoAccessControlRepository:
             result = await self.user_roles.insert_one(user_role.model_dump(by_alias=True))
             return str(result.inserted_id)
         except Exception as e:
-            log_error("Failed to assign role", extra={"error": str(e)})
+            self.logger.error("Failed to assign role", context={"error": str(e)})
             raise
 
     async def get_user_role(self, user_id: str) -> Optional[str]:
